@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Question Assistant</title>
+    
+    <!-- Bootstrap 5.3 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
+            --secondary-gradient: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
+            --surface-color: rgba(255, 255, 255, 0.95);
+            --glass-border: rgba(255, 255, 255, 0.2);
+            --shadow-color: rgba(0, 0, 0, 0.1);
+        }
+        
+        * {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        
+        body {
+            background: var(--primary-gradient);
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+        }
+        
+        /* Animated background elements */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="0.5"/></pattern></defs><rect width="100" height="100" fill="url(%23grid)"/></svg>');
+            pointer-events: none;
+            z-index: -1;
+        }
+        
+        .main-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            padding: 2rem 0;
+        }
+        
+        .glass-card {
+            background: var(--surface-color);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            box-shadow: 0 25px 50px var(--shadow-color);
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .glass-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--secondary-gradient);
+            z-index: 1;
+        }
+        
+        .card-header {
+            background: transparent;
+            border: none;
+            text-align: center;
+            padding: 3rem 2rem 1rem;
+        }
+        
+        .main-title {
+            font-size: 3rem;
+            font-weight: 700;
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+            position: relative;
+        }
+        
+        .subtitle {
+            color: #64748b;
+            font-size: 1.1rem;
+            font-weight: 400;
+            margin-bottom: 0;
+        }
+        
+        .question-section {
+            padding: 0 2rem 2rem;
+        }
+        
+        .form-floating label {
+            color: #64748b;
+            font-weight: 500;
+        }
+        
+        .form-control {
+            border: 2px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 1.5rem;
+            font-size: 1rem;
+            min-height: 150px;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.8);
+        }
+        
+        .form-control:focus {
+            border-color: #6366f1;
+            box-shadow: 0 0 0 0.25rem rgba(99, 102, 241, 0.15);
+            background: rgba(255, 255, 255, 0.95);
+        }
+        
+        .btn-gradient {
+            background: var(--secondary-gradient);
+            border: none;
+            border-radius: 50px;
+            padding: 0.875rem 2.5rem;
+            font-weight: 600;
+            font-size: 1rem;
+            color: white;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(6, 182, 212, 0.4);
+        }
+        
+        .btn-gradient:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(6, 182, 212, 0.6);
+            color: white;
+        }
+        
+        .btn-gradient:active {
+            transform: translateY(0);
+        }
+        
+        .btn-outline-gradient {
+            background: transparent;
+            border: 2px solid transparent;
+            background-clip: padding-box;
+            border-radius: 50px;
+            padding: 0.875rem 2.5rem;
+            font-weight: 600;
+            font-size: 1rem;
+            color: #6366f1;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        
+        .btn-outline-gradient::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            padding: 2px;
+            background: var(--primary-gradient);
+            border-radius: inherit;
+            mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            mask-composite: xor;
+            -webkit-mask-composite: xor;
+        }
+        
+        .btn-outline-gradient:hover {
+            color: white;
+            background: var(--primary-gradient);
+            transform: translateY(-2px);
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            border: none;
+            border-radius: 50px;
+            padding: 0.875rem 2.5rem;
+            font-weight: 600;
+            font-size: 1rem;
+            color: white;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4);
+        }
+        
+        .btn-warning:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(245, 158, 11, 0.6);
+            color: white;
+            background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+        }
+        
+        /* Advanced Loading Spinner */
+        .loading-container {
+            display: none;
+            text-align: center;
+            padding: 3rem 0;
+        }
+        
+        .advanced-spinner {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 2rem;
+        }
+        
+        .spinner-ring {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border: 3px solid transparent;
+            border-radius: 50%;
+            animation: spin 2s linear infinite;
+        }
+        
+        .spinner-ring:nth-child(1) {
+            border-top: 3px solid #6366f1;
+            animation-delay: 0s;
+        }
+        
+        .spinner-ring:nth-child(2) {
+            border-right: 3px solid #8b5cf6;
+            animation-delay: -0.5s;
+            animation-direction: reverse;
+        }
+        
+        .spinner-ring:nth-child(3) {
+            border-bottom: 3px solid #d946ef;
+            animation-delay: -1s;
+        }
+        
+        .spinner-ring:nth-child(4) {
+            border-left: 3px solid #06b6d4;
+            animation-delay: -1.5s;
+            animation-direction: reverse;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .loading-text {
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: #64748b;
+            margin-bottom: 0.5rem;
+        }
+        
+        .loading-subtext {
+            font-size: 0.9rem;
+            color: #94a3b8;
+        }
+        
+        /* Typing animation for loading text */
+        .typing-dots::after {
+            content: '';
+            animation: typing 1.5s infinite;
+        }
+        
+        @keyframes typing {
+            0%, 20% { content: ''; }
+            40% { content: '.'; }
+            60% { content: '..'; }
+            80%, 100% { content: '...'; }
+        }
+        
+        /* Response Container */
+        .response-container {
+            display: none;
+            margin-top: 2rem;
+        }
+        
+        .response-card {
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border: 1px solid #e2e8f0;
+            border-radius: 20px;
+            padding: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .response-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--secondary-gradient);
+        }
+        
+        .response-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            font-weight: 600;
+            color: #1e293b;
+            font-size: 1.2rem;
+        }
+        
+        .response-header i {
+            margin-right: 0.75rem;
+            color: #6366f1;
+        }
+        
+        .response-content {
+            line-height: 1.7;
+            color: #374151;
+            font-size: 1rem;
+        }
+        
+        .response-content h1, .response-content h2, .response-content h3,
+        .response-content h4, .response-content h5, .response-content h6 {
+            color: #1e293b;
+            margin: 1.5rem 0 1rem 0;
+            font-weight: 600;
+        }
+        
+        .response-content p {
+            margin-bottom: 1rem;
+        }
+        
+        .response-content ul, .response-content ol {
+            margin: 1rem 0;
+            padding-left: 1.5rem;
+        }
+        
+        .response-content li {
+            margin-bottom: 0.5rem;
+        }
+        
+        .response-content code {
+            background: #e2e8f0;
+            padding: 0.25rem 0.5rem;
+            border-radius: 6px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            font-size: 0.875em;
+        }
+        
+        .response-content pre {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 1.5rem;
+            border-radius: 12px;
+            overflow-x: auto;
+            margin: 1.5rem 0;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+        }
+        
+        .response-content blockquote {
+            border-left: 4px solid #6366f1;
+            padding-left: 1rem;
+            margin: 1.5rem 0;
+            color: #64748b;
+            font-style: italic;
+            background: rgba(99, 102, 241, 0.05);
+            padding: 1rem 1rem 1rem 1.5rem;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        /* Alert Styles */
+        .alert-custom {
+            border: none;
+            border-radius: 16px;
+            padding: 1.25rem 1.5rem;
+            margin-top: 1.5rem;
+            font-weight: 500;
+        }
+        
+        .alert-error {
+            background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+            color: #dc2626;
+            border-left: 4px solid #dc2626;
+        }
+        
+        .alert-info {
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            color: #2563eb;
+            border-left: 4px solid #2563eb;
+        }
+        
+        /* Animations */
+        .fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        .slide-up {
+            animation: slideUp 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .main-title {
+                font-size: 2.25rem;
+            }
+            
+            .glass-card {
+                margin: 1rem;
+            }
+            
+            .card-header {
+                padding: 2rem 1.5rem 1rem;
+            }
+            
+            .question-section {
+                padding: 0 1.5rem 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid main-container">
+        <div class="container">
+            <div class="row justify-content-center">
+                <div class="col-12 col-lg-10 col-xl-8">
+                    <div class="glass-card fade-in">
+                        <div class="card-header">
+                            <h1 class="main-title">
+                                <i class="bi bi-robot me-3"></i>Code-X AI Assistant
+                            </h1>
+                            <p class="subtitle">Get expert answers from Qwen, GPT, and LLaMA — judged by Qwen. </p>
+                        </div>
+                        
+                        <div class="question-section">
+                            <form id="questionForm">
+                                <!-- CSRF Token (hidden) -->
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                                
+                                <div class="form-floating mb-4">
+                                    <textarea 
+                                        class="form-control" 
+                                        id="question" 
+                                        name="question"
+                                        placeholder="What would you like to know?"
+                                        required
+                                    ></textarea>
+                                    <label for="question">
+                                        <i class="bi bi-chat-dots me-2"></i>What would you like to know?
+                                    </label>
+                                </div>
+                                
+                                <div class="d-flex gap-3 justify-content-center">
+                                    <button type="submit" class="btn btn-gradient" id="submitBtn">
+                                        <i class="bi bi-send me-2"></i>Ask Question
+                                    </button>
+                                    <button type="button" class="btn btn-warning" id="retryBtn" style="display: none;" onclick="retryQuestion()">
+                                        <i class="bi bi-arrow-repeat me-2"></i>Retry
+                                    </button>
+                                    <button type="button" class="btn btn-outline-gradient" id="newQuestionBtn" style="display: none;" onclick="resetForm()">
+                                        <i class="bi bi-arrow-clockwise me-2"></i>New Question
+                                    </button>
+                                </div>
+                            </form>
+                            
+                            <!-- Advanced Loading Spinner -->
+                            <div class="loading-container" id="loading">
+                                <div class="advanced-spinner">
+                                    <div class="spinner-ring"></div>
+                                    <div class="spinner-ring"></div>
+                                    <div class="spinner-ring"></div>
+                                    <div class="spinner-ring"></div>
+                                </div>
+                                <div class="loading-text typing-dots">Processing your question</div>
+                                <div class="loading-subtext">Our AI is analyzing and generating a response...</div>
+                            </div>
+                            
+                            <!-- Response Container -->
+                            <div class="response-container" id="responseContainer">
+                                <div class="response-card slide-up">
+                                    <div class="response-header">
+                                        <i class="bi bi-lightbulb"></i>
+                                        AI Response
+                                    </div>
+                                    <div class="response-content" id="responseContent"></div>
+                                </div>
+                            </div>
+                            
+                            <!-- Alerts -->
+                            <div class="alert alert-custom alert-info" id="newQuestionNotice" style="display: none;">
+                                <i class="bi bi-info-circle me-2"></i>
+                                <strong>Ready for another question?</strong> Click "New Question" to ask something else.
+                            </div>
+                            
+                            <div class="alert alert-custom alert-error" id="error" style="display: none;">
+                                <i class="bi bi-exclamation-triangle me-2"></i>
+                                <span id="errorText"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5.3 JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        let questionAsked = false;
+        let lastQuestion = '';
+        
+        async function submitQuestion(isRetry = false) {
+            const question = document.getElementById('question').value.trim();
+            if (!question) {
+                showError('Please enter a question before submitting.');
+                return;
+            }
+            
+            // Store the question for retry functionality
+            if (!isRetry) {
+                lastQuestion = question;
+            }
+            
+            // Show loading state with animation
+            const loading = document.getElementById('loading');
+            const submitBtn = document.getElementById('submitBtn');
+            const retryBtn = document.getElementById('retryBtn');
+            const responseContainer = document.getElementById('responseContainer');
+            const errorDiv = document.getElementById('error');
+            const newQuestionNotice = document.getElementById('newQuestionNotice');
+            
+            loading.style.display = 'block';
+            loading.classList.add('fade-in');
+            submitBtn.disabled = true;
+            retryBtn.style.display = 'none';
+            responseContainer.style.display = 'none';
+            errorDiv.style.display = 'none';
+            newQuestionNotice.style.display = 'none';
+            
+            try {
+                // Create form data with CSRF token
+                const formData = new FormData();
+                formData.append('question', question);
+                formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+                
+                const response = await fetch('/web-ask', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.detail || 'An error occurred while processing your question.');
+                }
+                
+                // Check if response is empty or malformed
+                if (!data.response || data.response.trim() === '') {
+                    throw new Error('Received empty response from AI. Please try again.');
+                }
+                
+                // Check if response looks malformed (very short or contains error indicators)
+                if (data.response.length < 20 || data.response.includes('[ERROR]') || data.response.includes('failed')) {
+                    throw new Error('Received potentially malformed response. Please retry your question.');
+                }
+                
+                // Hide loading and display response with animation
+                loading.style.display = 'none';
+                document.getElementById('responseContent').innerHTML = data.response;
+                responseContainer.style.display = 'block';
+                responseContainer.querySelector('.response-card').classList.add('slide-up');
+                newQuestionNotice.style.display = 'block';
+                newQuestionNotice.classList.add('fade-in');
+                
+                // Mark question as asked and update UI
+                if (!isRetry) {
+                    questionAsked = true;
+                    document.getElementById('question').disabled = true;
+                    document.getElementById('question').classList.add('disabled');
+                }
+                submitBtn.style.display = 'none';
+                document.getElementById('newQuestionBtn').style.display = 'inline-block';
+                retryBtn.style.display = 'inline-block'; // Always show retry button after response
+                
+            } catch (error) {
+                showError(error.message, true); // Show error with retry option
+            } finally {
+                loading.style.display = 'none';
+                submitBtn.disabled = false;
+            }
+        }
+        
+        document.getElementById('questionForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            if (questionAsked) {
+                return;
+            }
+            
+            await submitQuestion(false);
+        });
+        
+        function retryQuestion() {
+            // Use the stored question for retry
+            if (lastQuestion) {
+                document.getElementById('question').value = lastQuestion;
+                submitQuestion(true); // Retry the same question
+            } else {
+                // Fallback: use current question value
+                const currentQuestion = document.getElementById('question').value.trim();
+                if (currentQuestion) {
+                    lastQuestion = currentQuestion;
+                    submitQuestion(true);
+                }
+            }
+        }
+        
+        
+        function resetForm() {
+            questionAsked = false;
+            lastQuestion = '';
+            const question = document.getElementById('question');
+            const submitBtn = document.getElementById('submitBtn');
+            const retryBtn = document.getElementById('retryBtn');
+            const newQuestionBtn = document.getElementById('newQuestionBtn');
+            const responseContainer = document.getElementById('responseContainer');
+            const newQuestionNotice = document.getElementById('newQuestionNotice');
+            const errorDiv = document.getElementById('error');
+            
+            question.value = '';
+            question.disabled = false;
+            question.classList.remove('disabled');
+            question.focus();
+            
+            submitBtn.style.display = 'inline-block';
+            retryBtn.style.display = 'none';
+            newQuestionBtn.style.display = 'none';
+            responseContainer.style.display = 'none';
+            newQuestionNotice.style.display = 'none';
+            errorDiv.style.display = 'none';
+            
+            // Add focus animation
+            question.classList.add('fade-in');
+            setTimeout(() => question.classList.remove('fade-in'), 500);
+        }
+        
+        function showError(message, showRetry = false) {
+            const errorDiv = document.getElementById('error');
+            const errorText = document.getElementById('errorText');
+            const retryBtn = document.getElementById('retryBtn');
+            const submitBtn = document.getElementById('submitBtn');
+            const newQuestionBtn = document.getElementById('newQuestionBtn');
+            
+            errorText.textContent = message;
+            errorDiv.style.display = 'block';
+            errorDiv.classList.add('slide-up');
+            
+            if (showRetry) {
+                // Always show retry button for failed requests
+                const currentQuestion = document.getElementById('question').value.trim();
+                
+                // Ensure we have the question stored for retry
+                if (!lastQuestion && currentQuestion) {
+                    lastQuestion = currentQuestion;
+                }
+                
+                // Show both retry and new question buttons
+                retryBtn.style.display = 'inline-block';
+                submitBtn.style.display = 'none';
+                newQuestionBtn.style.display = 'inline-block';
+            }
+            
+            // Remove animation class after animation completes
+            setTimeout(() => errorDiv.classList.remove('slide-up'), 600);
+        }
+        
+        // Add some interactive effects
+        document.addEventListener('DOMContentLoaded', function() {
+            // Focus the textarea on page load
+            document.getElementById('question').focus();
+            
+            // Add ripple effect to buttons (optional enhancement)
+            const buttons = document.querySelectorAll('.btn');
+            buttons.forEach(button => {
+                button.addEventListener('click', function(e) {
+                    const ripple = document.createElement('span');
+                    const rect = this.getBoundingClientRect();
+                    const size = Math.max(rect.width, rect.height);
+                    const x = e.clientX - rect.left - size / 2;
+                    const y = e.clientY - rect.top - size / 2;
+                    
+                    ripple.style.cssText = `
+                        position: absolute;
+                        width: ${size}px;
+                        height: ${size}px;
+                        left: ${x}px;
+                        top: ${y}px;
+                        background: rgba(255, 255, 255, 0.3);
+                        border-radius: 50%;
+                        transform: scale(0);
+                        animation: ripple 0.6s linear;
+                        pointer-events: none;
+                    `;
+                    
+                    this.appendChild(ripple);
+                    
+                    setTimeout(() => {
+                        ripple.remove();
+                    }, 600);
+                });
+            });
+        });
+        
+        // Add ripple animation
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes ripple {
+                to {
+                    transform: scale(2);
+                    opacity: 0;
+                }
+            }
+            .btn {
+                position: relative;
+                overflow: hidden;
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>

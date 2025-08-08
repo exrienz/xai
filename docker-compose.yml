@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  xai-app:
+    build: .
+    ports:
+      - "2000:2000"
+    environment:
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      - CODE_X_KEY=${CODE_X_KEY}
+      - MODEL1=${MODEL1}
+      - MODEL2=${MODEL2}
+      - MODEL3=${MODEL3}
+      - JUDGE=${JUDGE}
+      - MAX_TOKENS=${MAX_TOKENS:-1024}
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
