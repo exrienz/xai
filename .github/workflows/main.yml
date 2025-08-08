@@ -1,0 +1,38 @@
+# .github/workflows/push-to-dockerhub.yml
+
+name: Build and Push x-ai Image to DockerHub
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - develop
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Log in to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract Git Commit SHA
+        id: vars
+        run: echo "SHA_TAG=$(echo ${GITHUB_SHA::7})" >> $GITHUB_ENV
+
+      - name: Build Docker Image
+        run: |
+          docker build -t exrienz/xai:latest .
+
+      - name: Tag and Push Docker Image
+        run: |
+          docker tag exrienz/xai:latest exrienz/xai:${{ env.SHA_TAG }}
+          docker push exrienz/xai:latest
+          docker push exrienz/xai:${{ env.SHA_TAG }}
