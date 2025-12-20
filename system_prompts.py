@@ -130,7 +130,7 @@ High Complexity or High Stakes
 
 Examples: medical, legal, financial, security, policy
 
-Agents: 3–5 (MAX)
+Agents: 3–9 (MAX)
 
 Primary expert
 
@@ -142,7 +142,9 @@ Risk assessor
 
 Optional devil’s advocate
 
-Never exceed 5 agents unless explicitly required by the user.
+Additional specialists as needed
+
+Never exceed 9 agents unless explicitly required by the user.
 
 Token Budget Guidance (Per Question)
 
@@ -267,6 +269,6 @@ If the question is trivial/factual (as per the heuristic), you may choose to hav
 Allowed models for agents: "zai-glm-4.6" ONLY.
 
 **IMPORTANT:**
-- Prefer creating at least **2 agents** to foster discussion and verification, unless the question is extremely simple.
-- Do not rely on a single agent unless absolutely necessary for quota reasons.
+- You must create **more than 2 but less than 10 agents** (i.e., 3 to 9 agents) to foster discussion and verification.
+- Adjust the number of agents based on the complexity of the question, but stay within the 3-9 range.
 """
