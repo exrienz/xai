@@ -4,39 +4,37 @@
 [![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
 
-A powerful FastAPI-based service that leverages multiple AI models through the Cerebras API to provide superior responses by combining the strengths of different models through an intelligent judge system.
+A powerful FastAPI-based service that leverages multiple AI models through the Cerebras API to provide superior responses by combining the strengths of different specialized agents through an intelligent orchestration system.
 
 ## ✨ Key Features
 
-- **Multi-Model Integration**: Queries 3 AI models simultaneously for comprehensive coverage
-- **Intelligent Judge System**: Synthesizes responses using a specialized judge model
-- **Secure Authentication**: API key-based authentication with CSRF protection
-- **Web Interface**: User-friendly web interface with real-time processing
-- **Full Containerization**: Docker and Docker Compose ready
-- **Async Processing**: High-performance async operations
-- **Comprehensive Logging**: Detailed logging with emojis for better readability
-- **Health Monitoring**: Built-in health check endpoints
+- **Multi-Agent Orchestration**: Dynamically recruits and coordinates specialized AI agents based on the query.
+- **Transparent Reasoning**: Displays the agent roster, individual responses, cross-analysis, and final synthesis.
+- **Secure Authentication**: API key-based authentication with CSRF protection.
+- **Web Interface**: User-friendly web interface with real-time processing and Markdown rendering.
+- **Full Containerization**: Docker and Docker Compose ready.
+- **Async Processing**: High-performance async operations.
+- **Comprehensive Logging**: Detailed logging with emojis for better readability.
+- **Health Monitoring**: Built-in health check endpoints.
 
 ## 🏗️ Architecture
 
 ```
-User Question → API Gateway → [Model1, Model2, Model3] → Judge Model → Synthesized Response
+User Question → Orchestrator (Plan) → [Agent 1, Agent 2, ...] (Execute) → Orchestrator (Synthesize) → Final Response
 ```
 
-1. **Input Processing**: User submits question via `/ask` endpoint or web interface
-2. **Parallel Execution**: System queries 3 models concurrently for optimal performance
-3. **Response Synthesis**: Judge model analyzes all responses and creates a unified answer
-4. **Output Delivery**: Returns input, individual model responses, and judge's final synthesized answer
+1. **Plan**: The Orchestrator (`gpt-oss-120b`) analyzes the question and recruits a roster of specialized agents (using `zai-glm-4.6`).
+2. **Execute**: Each recruited agent processes the question from their specific perspective in parallel.
+3. **Synthesize**: The Orchestrator reviews all agent responses, performs cross-analysis, and produces a final unified answer.
+4. **Output Delivery**: Returns the full transparent reasoning chain and the final answer.
 
 ## 🤖 AI Models
 
-### Primary Models
-- **Qwen 3 235B**: `qwen-3-235b-a22b-instruct-2507` - Advanced reasoning and comprehensive responses
-- **GPT OSS 120B**: `gpt-oss-120b` - Strong general knowledge and natural language understanding
-- **Llama 4 Maverick**: `llama-4-maverick-17b-128e-instruct` - Efficient and reliable performance
+### Orchestrator
+- **GPT OSS 120B**: `gpt-oss-120b` - Responsible for planning, coordination, and final synthesis.
 
-### Judge Model
-- **Qwen 3 235B Thinking**: `qwen-3-235b-a22b-thinking-2507` - Specialized for response analysis and synthesis
+### Domain Experts
+- **Zai GLM 4.6**: `zai-glm-4.6` - Used for specialized domain agents (Medical, Legal, Technical, etc.).
 
 ## 🚀 Quick Start
 
@@ -55,10 +53,8 @@ CEREBRAS_API_KEY=your_cerebras_api_key_here
 CODE_X_KEY=your_custom_api_key_here
 
 # Model Configuration
-MODEL1=qwen-3-235b-a22b-instruct-2507
-MODEL2=gpt-oss-120b
-MODEL3=llama-4-maverick-17b-128e-instruct
-JUDGE=qwen-3-235b-a22b-thinking-2507
+# Note: The code strictly enforces gpt-oss-120b for orchestration and zai-glm-4.6 for agents.
+# These variables might be used for fallbacks or configuration if the code allows flexibility.
 
 # API Settings
 MAX_TOKENS=1024
