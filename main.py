@@ -135,10 +135,9 @@ async def call_openwebui(model: str, messages: List[Dict[str, str]], json_mode: 
     # Construct URL
     url = OPENWEBUI_BASE
     if "chat/completions" not in url:
-        url = f"{url.rstrip('/')}/chat/completions"
-        # If /api is needed (common in OpenWebUI/Ollama wrappers), user should likely put it in env,
-        # or we could try to auto-detect.
-        # Assuming standard OpenAI compatible endpoint structure from the user provided base.
+        url = f"{url.rstrip('/')}/api/chat/completions"
+        # We enforce /api/chat/completions here because the user's base URL does not include it,
+        # and simple /chat/completions fails with 405 Method Not Allowed on some setups (like this one).
 
     headers = {
         "Authorization": f"Bearer {OPENWEBUI_KEY}",
