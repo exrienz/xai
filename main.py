@@ -40,7 +40,7 @@ MODEL_SPECIALIST_PRIMARY = os.getenv("MODEL_SPECIALIST_PRIMARY", "random")
 MODEL_SPECIALIST_FALLBACK = os.getenv("MODEL_SPECIALIST_FALLBACK", "cognitivecomputations/dolphin-mistral-24b-venice-edition:free")
 
 # Combine pools for random selection
-MODEL_POOL = get_env_list("MODEL_POOL_OPENWEBUI") + get_env_list("MODEL_POOL_CEREBRAS")
+MODEL_POOL = get_env_list("MODEL_POOL_OPENWEBUI")
 # Deduplicate while preserving order
 MODEL_POOL = list(dict.fromkeys(MODEL_POOL))
 
