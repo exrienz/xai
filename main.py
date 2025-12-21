@@ -274,11 +274,11 @@ async def step1_plan(question: str) -> Dict[str, Any]:
 
         plan = json.loads(response)
 
-        # Enforce agent limits (< 10)
+        # Enforce agent limits (<= 10)
         agents = plan.get("agents", [])
-        if len(agents) >= 10:
-            logger.warning(f"Orchestrator suggested {len(agents)} agents. Limiting to 9.")
-            agents = agents[:9]
+        if len(agents) > 10:
+            logger.warning(f"Orchestrator suggested {len(agents)} agents. Limiting to 10.")
+            agents = agents[:10]
             plan["agents"] = agents
 
         logger.info(f"📋 ORCHESTRATOR PLAN: {plan}")
