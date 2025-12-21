@@ -68,6 +68,30 @@ CSRF_SECRET_KEY = os.getenv("CSRF_SECRET_KEY", secrets.token_hex(32))
 csrf_serializer = URLSafeTimedSerializer(CSRF_SECRET_KEY)
 
 # --- Helpers ---
+def extract_json_from_text(text: str) -> str:
+    """Extract JSON from text, handling Markdown code blocks."""
+    text = text.strip()
+    # Check for markdown code blocks
+    if "```json" in text:
+        try:
+            start = text.index("```json") + 7
+            end = text.index("```", start)
+            return text[start:end].strip()
+        except ValueError:
+            pass
+    # Try generic code block if json specific not found or failed
+    if "```" in text:
+        try:
+            start = text.index("```") + 3
+            end = text.index("```", start)
+            candidate = text[start:end].strip()
+            # simple check if it looks like json
+            if candidate.startswith("{") or candidate.startswith("["):
+                 return candidate
+        except ValueError:
+            pass
+    return text
+
 def generate_csrf_token() -> str:
     """Generate a CSRF token"""
     return csrf_serializer.dumps({"timestamp": time.time()})
@@ -144,15 +168,59 @@ async def call_openwebui(model: str, messages: List[Dict[str, str]], json_mode: 
         "Content-Type": "application/json"
     }
 
+    # Detect Reasoning/Thinking models (e.g., o1, o3)
+    is_reasoning = model.startswith("o1-") or model.startswith("o3-")
+
+    # Adjust Payload for Reasoning Models
+    final_messages = messages
+    if is_reasoning:
+        # Reasoning models generally do not support 'system' role. Merge into first user message.
+        system_content = ""
+        new_messages = []
+        for msg in messages:
+            if msg["role"] == "system":
+                system_content += msg["content"] + "\n\n"
+            else:
+                new_messages.append(msg.copy()) # Copy to avoid mutating original
+
+        if system_content:
+            if new_messages and new_messages[0]["role"] == "user":
+                new_messages[0]["content"] = system_content + new_messages[0]["content"]
+            else:
+                # If first message is not user (unlikely), prepend a user message
+                new_messages.insert(0, {"role": "user", "content": system_content.strip()})
+
+        final_messages = new_messages
+
     payload = {
         "model": model,
-        "messages": messages,
-        "temperature": TEMPERATURE,
-        "top_p": TOP_P,
-        "max_tokens": MAX_TOKENS
+        "messages": final_messages,
     }
 
-    if json_mode:
+    if is_reasoning:
+        # Reasoning models use max_completion_tokens and fixed temp/top_p
+        payload["max_completion_tokens"] = MAX_TOKENS
+        # Do not send temperature/top_p as they are often unsupported or must be 1.0
+    else:
+        # Standard Chat Models
+        payload["temperature"] = TEMPERATURE
+        payload["top_p"] = TOP_P
+        payload["max_tokens"] = MAX_TOKENS
+
+    if json_mode and not is_reasoning:
+        # o1 models support response_format in newer versions, but early previews did not.
+        # Assuming we can skip it or strictness might vary.
+        # Let's keep it if supported, but for safety in this "native support" context,
+        # we might rely on the prompt to enforce JSON if the model is smart (like o1).
+        # However, checking docs: o1-2024-12-17 supports json_object.
+        # Let's add it if not o1-preview or try to include it.
+        # For safety and "native" support of potentially older/preview models, we can omit it
+        # and rely on the robust JSON extractor we added.
+        # But for standard models, we keep it.
+        payload["response_format"] = {"type": "json_object"}
+    elif json_mode and is_reasoning:
+        # Try to support JSON mode for reasoning models if they support it
+        # Current o1 supports it.
         payload["response_format"] = {"type": "json_object"}
 
     async with httpx.AsyncClient() as http_client:
@@ -272,7 +340,9 @@ async def step1_plan(question: str) -> Dict[str, Any]:
         if not response:
             raise ValueError("Empty response from planner")
 
-        plan = json.loads(response)
+        # Extract JSON using helper to handle Markdown/Thinking output
+        json_text = extract_json_from_text(response)
+        plan = json.loads(json_text)
 
         # Enforce agent limits (< 10)
         agents = plan.get("agents", [])
