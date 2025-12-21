@@ -6,7 +6,7 @@ import time
 import json
 import random
 import httpx
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 from fastapi import FastAPI, HTTPException, Header, Depends, Form
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -297,12 +297,13 @@ async def step1_plan(question: str) -> Dict[str, Any]:
         logger.error(f"Planning failed: {e}")
         return {"reasoning": f"Planning failed: {str(e)}", "agents": []}
 
-async def step2_execute(agents: List[Dict[str, str]], question: str) -> Dict[str, str]:
-    """Execute agents in parallel."""
+async def step2_execute(agents: List[Dict[str, str]], question: str) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Execute agents in parallel. Returns (responses, models_used)."""
     logger.info(f"🚀 EXECUTING {len(agents)} AGENTS")
     
     tasks = []
     agent_names = []
+    agent_models = {}
     
     for agent in agents:
         name = agent.get("name", "Unknown Agent")
@@ -312,6 +313,7 @@ async def step2_execute(agents: List[Dict[str, str]], question: str) -> Dict[str
         model = get_random_specialist_model()
         logger.info(f"🎯 Assigned model {model} to agent {name}")
 
+        agent_models[name] = model
         agent_names.append(name)
 
         system_msg = f"You are {name}. Role: {role}. Question: {question}. Answer concisely and professionally."
@@ -337,13 +339,22 @@ async def step2_execute(agents: List[Dict[str, str]], question: str) -> Dict[str
             responses[name] = result
     
     logger.info(f"✅ AGENT EXECUTION COMPLETE")
-    return responses
+    return responses, agent_models
 
-async def step3_synthesize(question: str, plan: Dict[str, Any], agent_responses: Dict[str, str]) -> str:
+async def step3_synthesize(question: str, plan: Dict[str, Any], agent_responses: Dict[str, str], agent_models: Dict[str, str]) -> str:
     """Synthesize final response using Orchestrator."""
     logger.info("👨‍⚖️ ORCHESTRATOR SYNTHESIS START")
     
-    agent_roster_str = "\n".join([f"- {a['name']} ({a.get('role', 'Agent')}): {a.get('role', 'Agent')}" for a in plan.get("agents", [])])
+    # Construct agent roster with actual models used
+    agent_roster_lines = []
+    for agent in plan.get("agents", []):
+        name = agent.get("name", "Unknown Agent")
+        role = agent.get("role", "Agent")
+        # Get the actual model used from Step 2, fallback to Unknown if not found
+        model_used = agent_models.get(name, "Unknown Model")
+        agent_roster_lines.append(f"- {name} (Role: {role}, Model: {model_used})")
+
+    agent_roster_str = "\n".join(agent_roster_lines)
     agent_responses_str = "\n\n".join([f"### {name}\n{resp}" for name, resp in agent_responses.items()])
     
     synthesis_input = f"""
@@ -390,10 +401,10 @@ async def orchestrate(question: str) -> Dict[str, Any]:
             "plan": plan
         }
     
-    agent_responses = await step2_execute(agents, question)
+    agent_responses, agent_models = await step2_execute(agents, question)
     
     # Step 3: Synthesize
-    final_output = await step3_synthesize(question, plan, agent_responses)
+    final_output = await step3_synthesize(question, plan, agent_responses, agent_models)
     
     return {
         "final_answer": final_output,

@@ -12,8 +12,8 @@ class TestOrchestration(unittest.IsolatedAsyncioTestCase):
         mock_plan = {
             "reasoning": "Test reasoning",
             "agents": [
-                {"name": "Agent1", "role": "Role1", "model": "zai-glm-4.6"},
-                {"name": "Agent2", "role": "Role2", "model": "zai-glm-4.6"}
+                {"name": "Agent1", "role": "Role1"},
+                {"name": "Agent2", "role": "Role2"}
             ]
         }
 
@@ -26,29 +26,32 @@ class TestOrchestration(unittest.IsolatedAsyncioTestCase):
     @patch("main.call_openwebui")
     async def test_step2_execute_runs_agents(self, mock_call_openwebui):
         agents = [
-            {"name": "Agent1", "role": "Role1", "model": "zai-glm-4.6"},
-            {"name": "Agent2", "role": "Role2", "model": "zai-glm-4.6"}
+            {"name": "Agent1", "role": "Role1"},
+            {"name": "Agent2", "role": "Role2"}
         ]
 
         # Mock individual agent responses
         mock_call_openwebui.return_value = "Response 1"
 
-        responses = await step2_execute(agents, "Test question")
+        responses, agent_models = await step2_execute(agents, "Test question")
         self.assertIn("Agent1", responses)
         self.assertIn("Agent2", responses)
+        self.assertIn("Agent1", agent_models)
+        self.assertIn("Agent2", agent_models)
 
     @patch("main.call_openwebui")
     async def test_step3_synthesize_constructs_output(self, mock_call_openwebui):
         plan = {
             "agents": [
-                {"name": "Agent1", "role": "Role1", "model": "zai-glm-4.6"}
+                {"name": "Agent1", "role": "Role1"}
             ]
         }
         responses = {"Agent1": "Response 1"}
+        agent_models = {"Agent1": "test-model"}
 
         mock_call_openwebui.return_value = "Final Answer"
 
-        final = await step3_synthesize("Test question", plan, responses)
+        final = await step3_synthesize("Test question", plan, responses, agent_models)
         self.assertEqual(final, "Final Answer")
 
 if __name__ == '__main__':
