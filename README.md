@@ -1,23 +1,19 @@
-# Multi-Model AI Response Fusion API 🤖
+# Multi-Agent AI Orchestrator 🤖
 
-[![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
-[![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)](https://www.python.org/)
-[![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
-
-A powerful FastAPI-based service that leverages multiple AI models through the Cerebras API to provide superior responses by combining the strengths of different specialized agents through an intelligent orchestration system.
+A powerful FastAPI-based service that leverages multiple AI models via an OpenWebUI compatible API to provide superior responses by combining the strengths of different specialized agents through an intelligent orchestration system.
 
 ## ✨ Key Features
 
 - **Multi-Agent Orchestration**: Dynamically recruits and coordinates specialized AI agents based on the query.
-- **Hybrid Model Architecture**: Combines Cerebras-powered orchestration with OpenWebUI-hosted specialist agents.
-- **Robust Fallback System**: Automatically switches to uncensored models (Dolphin Mistral) if agents encounter errors or censorship refusals.
+- **Unified API Interface**: All models are accessed via `OPENWEBUI_BASE`, simplifying integration.
+- **Robust Fallback System**:
+  - Primary Orchestrator: `gpt-oss-120b`
+  - Fallback/Uncensored Backstop: `dolphin-mistral-24b-venice-edition`
+  - Retry Logic: If the fallback fails, it retries with other models from the pool.
 - **Transparent Reasoning**: Displays the agent roster, individual responses, cross-analysis, and final synthesis.
 - **Secure Authentication**: API key-based authentication with CSRF protection.
-- **Web Interface**: User-friendly web interface with real-time processing and Markdown rendering.
-- **Full Containerization**: Docker and Docker Compose ready.
-- **Async Processing**: High-performance async operations.
-- **Comprehensive Logging**: Detailed logging with emojis for better readability.
-- **Health Monitoring**: Built-in health check endpoints.
+- **Web Interface**: User-friendly web interface.
+- **Docker Ready**: Full containerization support.
 
 ## 🏗️ Architecture
 
@@ -25,256 +21,103 @@ A powerful FastAPI-based service that leverages multiple AI models through the C
 User Question → Orchestrator (Plan) → [Agent 1, Agent 2, ...] (Execute) → Orchestrator (Synthesize) → Final Response
 ```
 
-1. **Plan**: The Orchestrator (`gpt-oss-120b`) analyzes the question and recruits a roster of specialized agents.
-2. **Execute**: Each recruited agent processes the question from their specific perspective in parallel. Agents are randomly assigned one of the specialized models. If an agent fails or refuses to answer (censorship), the system automatically retries with a fallback model.
+1. **Plan**: The Orchestrator (`gpt-oss-120b`) analyzes the question and recruits a roster of specialized agents (3-9 agents).
+2. **Execute**: Each recruited agent processes the question. Agents are **randomly assigned** a model from the configured pools.
 3. **Synthesize**: The Orchestrator reviews all agent responses, performs cross-analysis, and produces a final unified answer.
-4. **Output Delivery**: Returns the full transparent reasoning chain and the final answer.
 
-## 🤖 AI Models
+## 🤖 Model Configuration & Fallback
 
-### Orchestrator
-- **GPT OSS 120B**: `gpt-oss-120b` - Responsible for planning, coordination, and final synthesis.
+The system is designed to be resilient and uncensored by default via fallback.
 
-### Domain Experts (OpenWebUI)
-Agents are randomly assigned one of the following models:
-- **Dolphin Mistral 24B**: `cognitivecomputations/dolphin-mistral-24b-venice-edition:free` (Also used as Fallback)
-- **Hermes 3 Llama 3.1 405B**: `nousresearch/hermes-3-llama-3.1-405b:free`
-- **Kimi K2**: `moonshotai/kimi-k2:free`
+### Model Hierarchy
+1. **Orchestrator**:
+   - Primary: `gpt-oss-120b`
+   - Fallback: `dolphin-mistral-24b-venice-edition` (Uncensored)
 
-### Fallback Mechanism
-If any model encounters an error or indicates censorship (e.g., "I cannot...", "I am unable..."), the request is automatically retried using **Dolphin Mistral 24B**.
+2. **Specialist Agents**:
+   - Primary: **Randomly Selected** from `MODEL_POOL_OPENWEBUI` and `MODEL_POOL_CEREBRAS`.
+   - Fallback: `dolphin-mistral-24b-venice-edition`
+
+### Fallback Logic
+If ANY model (Orchestrator or Specialist):
+1. Returns an error (HTTP 500, timeout, etc.)
+2. Refuses to answer (Censorship detection: "I cannot", "As an AI", etc.)
+
+Then:
+- The system immediately switches to the **Venice** model (`dolphin-mistral-24b-venice-edition`).
+- If Venice itself fails, it retries with another random model from the pool.
 
 ## 🚀 Quick Start
-
-### Prerequisites
-- Docker and Docker Compose (recommended)
-- Python 3.11+ (for local development)
-- Cerebras API key
 
 ### 1. Environment Configuration
 
 Create a `.env` file in the project root:
 
 ```env
-# Cerebras API Configuration
-CEREBRAS_API_KEY=your_cerebras_api_key_here
+OPENWEBUI_KEY=your_key_here
+OPENWEBUI_BASE=https://your-openwebui-instance
+
+CEREBRAS_API_KEY=your_cerebras_key_here
 CODE_X_KEY=your_custom_api_key_here
+CSRF_SECRET_KEY=your_secret_key_here
 
-# OpenWebUI Configuration
-OPENWEBUI_BASE=https://your-openwebui-instance/api
-OPENWEBUI_KEY=your_openwebui_key
+# Orchestrator Configuration
+MODEL_ORCHESTRATOR_PRIMARY=gpt-oss-120b
+MODEL_ORCHESTRATOR_FALLBACK=cognitivecomputations/dolphin-mistral-24b-venice-edition:free
 
-# API Settings
-MAX_TOKENS=1024
+# Specialist Configuration
+MODEL_SPECIALIST_PRIMARY=random
+MODEL_SPECIALIST_FALLBACK=cognitivecomputations/dolphin-mistral-24b-venice-edition:free
+
+# Model Pools (Comma separated)
+MODEL_POOL_OPENWEBUI=nousresearch/hermes-3-llama-3.1-405b:free,moonshotai/kimi-k2:free,cognitivecomputations/dolphin-mistral-24b-venice-edition:free
+MODEL_POOL_CEREBRAS=gpt-oss-120b,qwen-3-235b-a22b-instruct-250,zai-glm-4.6
+
+# Generation Settings
+MAX_TOKENS=4096
 TEMPERATURE=0.7
 TOP_P=0.8
-STREAM=false
-SHOW_MODEL_OUTPUT=false
-
-# Security
-CSRF_SECRET_KEY=your_csrf_secret_key_here
 ```
 
-### 2. Deploy with Docker Compose (Recommended)
+### 2. Deploy with Docker
 
 ```bash
-# Clone and navigate to project
-git clone <repository-url>
-cd xai
-
-# Start the service
 docker-compose up --build
-
-# Service will be available at http://localhost:2000
 ```
 
-### 3. Alternative: Docker
+### 3. Local Development
 
 ```bash
-# Build the image
-docker build -t xai-app .
-
-# Run the container
-docker run -p 2000:2000 --env-file .env xai-app
-```
-
-### 4. Local Development
-
-```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Run the application
 python main.py
 ```
 
 ## 📚 API Documentation
 
-### Authentication
-All API endpoints require the `code-x-key` header matching your configured `CODE_X_KEY`.
+### `POST /ask`
+Main API endpoint. Requires `code-x-key` header.
 
-### Endpoints
-
-#### `POST /ask`
-Main API endpoint for processing questions.
-
-**Request:**
-```bash
-curl -X POST "http://localhost:2000/ask" \
-  -H "Content-Type: application/json" \
-  -H "code-x-key: your_custom_api_key_here" \
-  -d '{
-    "question": "What is quantum computing?",
-    "system_message": "You are a helpful assistant."
-  }'
-```
-
-**Response:**
 ```json
 {
-  "input": "What is quantum computing?",
-  "models": {
-    "MODEL1": "Response from Qwen 3 235B...",
-    "MODEL2": "Response from GPT OSS 120B...",
-    "MODEL3": "Response from Llama 4 Maverick..."
-  },
-  "judge": {
-    "final_answer": "Synthesized response combining the best aspects...",
-    "reasoning": "The synthesis process considered..."
-  }
-}
-```
-
-#### `GET /`
-Web interface for interactive usage.
-
-#### `POST /web-ask`
-Backend endpoint for web interface with CSRF protection.
-
-#### `GET /health`
-Health check endpoint.
-
-**Response:**
-```json
-{
-  "status": "healthy"
+  "question": "How do I ...?",
+  "system_message": "Optional system prompt"
 }
 ```
 
 ## 🛠️ Configuration Options
 
-| Environment Variable | Description | Default |
-|---------------------|-------------|---------|
-| `CEREBRAS_API_KEY` | Cerebras API key | Required |
-| `OPENWEBUI_BASE` | Base URL for OpenWebUI API | Required |
-| `OPENWEBUI_KEY` | API Key for OpenWebUI | Required |
-| `CODE_X_KEY` | Custom API key for authentication | Required |
-| `MAX_TOKENS` | Maximum tokens per response | 1024 |
-| `TEMPERATURE` | Model temperature | 0.7 |
-| `TOP_P` | Top-p sampling | 0.8 |
-| `STREAM` | Enable streaming responses | false |
-| `SHOW_MODEL_OUTPUT` | Include individual model responses in API output | false |
-| `CSRF_SECRET_KEY` | CSRF protection secret | Auto-generated |
+| Environment Variable | Description |
+|---------------------|-------------|
+| `OPENWEBUI_BASE` | Base URL for the OpenAI-compatible API |
+| `MODEL_ORCHESTRATOR_PRIMARY` | Main model for planning/synthesis |
+| `MODEL_SPECIALIST_PRIMARY` | "random" for random assignment |
+| `MODEL_POOL_OPENWEBUI` | List of models available via OpenWebUI |
+| `MODEL_POOL_CEREBRAS` | List of Cerebras models (accessed via OpenWebUI) |
 
-## 🔒 Security Features
+## 🔒 Security
 
-- **API Key Authentication**: Secure access control
-- **CSRF Protection**: Web interface protected against cross-site request forgery
-- **Environment-based Secrets**: No hardcoded credentials
-- **Request Validation**: Input validation with Pydantic models
-- **Error Handling**: Comprehensive error handling without information leakage
-
-## 📊 Monitoring & Logging
-
-The application provides comprehensive logging with emoji indicators:
-- 🤖 AI model requests
-- ✅ Successful responses
-- ❌ Error conditions
-- 👨‍⚖️ Judge processing
-- 🌐 Web interface requests
-- 🔐 Security events
-
-## 🐳 Docker Configuration
-
-### Dockerfile
-- Based on Python 3.11 slim image
-- Multi-stage build for optimization
-- Health check included
-- Non-root user execution
-
-### Docker Compose
-- Service orchestration
-- Environment file integration
-- Port mapping and health checks
-- Easy scaling configuration
-
-## 🧪 Development
-
-### Project Structure
-```
-xai/
-├── main.py              # Main FastAPI application
-├── templates/           # Jinja2 templates
-│   └── index.html      # Web interface
-├── requirements.txt     # Python dependencies
-├── Dockerfile          # Container configuration
-├── docker-compose.yml  # Service orchestration
-├── .env.example        # Environment template
-└── README.md          # This file
-```
-
-### Dependencies
-- **FastAPI 0.104.1**: Modern web framework
-- **Uvicorn 0.24.0**: ASGI server
-- **HTTPX 0.25.2**: HTTP client for API calls
-- **Pydantic**: Data validation
-- **Cerebras Cloud SDK**: AI model integration
-- **Jinja2**: Template engine
-- **python-dotenv**: Environment management
-
-### Running Tests
-```bash
-# Add your test commands here
-# Example: pytest tests/
-```
-
-### Code Quality
-```bash
-# Linting
-# Add your linting commands here
-
-# Type checking
-# Add your type checking commands here
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🆘 Support
-
-For support and questions:
-- Create an issue in the GitHub repository
-- Check the logs for detailed error information
-- Ensure your environment variables are properly configured
-
-## 🎯 Roadmap
-
-- [ ] Support for additional AI model providers
-- [ ] Response caching system
-- [ ] Advanced analytics and metrics
-- [ ] Rate limiting and quota management
-- [ ] Webhook support for notifications
-- [ ] Multi-language support
+- **Censorship Evasion**: The system automatically falls back to uncensored models if the primary model refuses a request.
+- **Fail-Safe**: Never exposes internal errors to the user; always attempts to answer.
 
 ---
-
-**Made with ❤️ using FastAPI and Cerebras AI**
+**Made with ❤️ using FastAPI and OpenWebUI**
