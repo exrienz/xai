@@ -12,7 +12,7 @@ You may ONLY use the following models:
 
 gpt-oss-120b
 
-zai-glm-4.6
+Specialist Models (OpenWebUI)
 
 No other models are permitted.
 
@@ -79,13 +79,11 @@ Final synthesis
 
 High-level reasoning
 
-zai-glm-4.6:
+Specialist Models:
 
 Domain experts
 
 Technical depth
-
-zai-glm-4.6:
 
 Lightweight critique or secondary opinion only
 
@@ -259,14 +257,14 @@ Output ONLY valid JSON in the following format:
         {
             "name": "Agent Name",
             "role": "Detailed role description",
-            "model": "zai-glm-4.6"
+            "model": "Specialist Model"
         },
         ...
     ]
 }
 
 If the question is trivial/factual (as per the heuristic), you may choose to have 0 agents and answer it yourself later, but for now, output an empty list for agents.
-Allowed models for agents: "zai-glm-4.6" ONLY.
+Allowed models for agents: "Specialist Model" ONLY.
 
 **IMPORTANT:**
 - You must create **more than 2 but less than 10 agents** (i.e., 3 to 9 agents) to foster discussion and verification.
