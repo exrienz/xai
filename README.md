@@ -9,6 +9,8 @@ A powerful FastAPI-based service that leverages multiple AI models through the C
 ## ✨ Key Features
 
 - **Multi-Agent Orchestration**: Dynamically recruits and coordinates specialized AI agents based on the query.
+- **Hybrid Model Architecture**: Combines Cerebras-powered orchestration with OpenWebUI-hosted specialist agents.
+- **Robust Fallback System**: Automatically switches to uncensored models (Dolphin Mistral) if agents encounter errors or censorship refusals.
 - **Transparent Reasoning**: Displays the agent roster, individual responses, cross-analysis, and final synthesis.
 - **Secure Authentication**: API key-based authentication with CSRF protection.
 - **Web Interface**: User-friendly web interface with real-time processing and Markdown rendering.
@@ -23,8 +25,8 @@ A powerful FastAPI-based service that leverages multiple AI models through the C
 User Question → Orchestrator (Plan) → [Agent 1, Agent 2, ...] (Execute) → Orchestrator (Synthesize) → Final Response
 ```
 
-1. **Plan**: The Orchestrator (`gpt-oss-120b`) analyzes the question and recruits a roster of specialized agents (using `zai-glm-4.6`).
-2. **Execute**: Each recruited agent processes the question from their specific perspective in parallel.
+1. **Plan**: The Orchestrator (`gpt-oss-120b`) analyzes the question and recruits a roster of specialized agents.
+2. **Execute**: Each recruited agent processes the question from their specific perspective in parallel. Agents are randomly assigned one of the specialized models. If an agent fails or refuses to answer (censorship), the system automatically retries with a fallback model.
 3. **Synthesize**: The Orchestrator reviews all agent responses, performs cross-analysis, and produces a final unified answer.
 4. **Output Delivery**: Returns the full transparent reasoning chain and the final answer.
 
@@ -33,8 +35,14 @@ User Question → Orchestrator (Plan) → [Agent 1, Agent 2, ...] (Execute) → 
 ### Orchestrator
 - **GPT OSS 120B**: `gpt-oss-120b` - Responsible for planning, coordination, and final synthesis.
 
-### Domain Experts
-- **Zai GLM 4.6**: `zai-glm-4.6` - Used for specialized domain agents (Medical, Legal, Technical, etc.).
+### Domain Experts (OpenWebUI)
+Agents are randomly assigned one of the following models:
+- **Dolphin Mistral 24B**: `cognitivecomputations/dolphin-mistral-24b-venice-edition:free` (Also used as Fallback)
+- **Hermes 3 Llama 3.1 405B**: `nousresearch/hermes-3-llama-3.1-405b:free`
+- **Kimi K2**: `moonshotai/kimi-k2:free`
+
+### Fallback Mechanism
+If any model encounters an error or indicates censorship (e.g., "I cannot...", "I am unable..."), the request is automatically retried using **Dolphin Mistral 24B**.
 
 ## 🚀 Quick Start
 
@@ -52,9 +60,9 @@ Create a `.env` file in the project root:
 CEREBRAS_API_KEY=your_cerebras_api_key_here
 CODE_X_KEY=your_custom_api_key_here
 
-# Model Configuration
-# Note: The code strictly enforces gpt-oss-120b for orchestration and zai-glm-4.6 for agents.
-# These variables might be used for fallbacks or configuration if the code allows flexibility.
+# OpenWebUI Configuration
+OPENWEBUI_BASE=https://your-openwebui-instance/api
+OPENWEBUI_KEY=your_openwebui_key
 
 # API Settings
 MAX_TOKENS=1024
@@ -158,9 +166,9 @@ Health check endpoint.
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
 | `CEREBRAS_API_KEY` | Cerebras API key | Required |
+| `OPENWEBUI_BASE` | Base URL for OpenWebUI API | Required |
+| `OPENWEBUI_KEY` | API Key for OpenWebUI | Required |
 | `CODE_X_KEY` | Custom API key for authentication | Required |
-| `MODEL1`, `MODEL2`, `MODEL3` | Primary AI models | See defaults above |
-| `JUDGE` | Judge model for synthesis | See defaults above |
 | `MAX_TOKENS` | Maximum tokens per response | 1024 |
 | `TEMPERATURE` | Model temperature | 0.7 |
 | `TOP_P` | Top-p sampling | 0.8 |
