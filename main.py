@@ -5,8 +5,9 @@ import secrets
 import time
 import json
 import random
+import re
 import httpx
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from fastapi import FastAPI, HTTPException, Header, Depends, Form
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -80,6 +81,35 @@ def validate_csrf_token(token: str, max_age: int = 3600) -> bool:
     except Exception:
         return False
 
+def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
+    """Extracts JSON from text, handling Markdown code blocks and reasoning traces."""
+    try:
+        # 1. Attempt direct JSON parsing
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Look for Markdown code blocks
+    json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # 3. Look for the first curly brace to the last curly brace
+    # This handles cases where there's text before or after the JSON
+    try:
+        start_index = text.find('{')
+        end_index = text.rfind('}')
+        if start_index != -1 and end_index != -1 and start_index < end_index:
+            json_str = text[start_index : end_index + 1]
+            return json.loads(json_str)
+    except json.JSONDecodeError:
+        pass
+
+    return None
+
 def get_random_specialist_model() -> str:
     """Select a random model from the pool."""
     if not MODEL_POOL:
@@ -144,15 +174,50 @@ async def call_openwebui(model: str, messages: List[Dict[str, str]], json_mode: 
         "Content-Type": "application/json"
     }
 
+    # Detect Reasoning/Thinking Models
+    is_reasoning_model = any(keyword in model.lower() for keyword in ["o1-", "o3-", "thinking", "reasoner"])
+
+    # Handle System Prompts for Reasoning Models
+    final_messages = messages
+    if is_reasoning_model:
+        # Merge system prompts into user prompts or convert role
+        final_messages = []
+        system_content = ""
+        for msg in messages:
+            if msg["role"] == "system":
+                system_content += f"{msg['content']}\n\n"
+            else:
+                # If we have accumulated system content, prepend it to the first user message
+                if system_content and msg["role"] == "user":
+                    final_messages.append({"role": "user", "content": system_content + msg["content"]})
+                    system_content = "" # Clear after merging
+                else:
+                    final_messages.append(msg)
+
+        # If there is leftover system content (e.g., only system prompt), allow it as user
+        if system_content:
+             final_messages.append({"role": "user", "content": system_content.strip()})
+
     payload = {
         "model": model,
-        "messages": messages,
-        "temperature": TEMPERATURE,
-        "top_p": TOP_P,
-        "max_tokens": MAX_TOKENS
+        "messages": final_messages,
     }
 
-    if json_mode:
+    # Add parameters conditionally
+    if is_reasoning_model:
+        # Reasoning models often don't support temperature/top_p or require them to be 1
+        # It is safer to omit them.
+        # They often use max_completion_tokens instead of max_tokens
+        payload["max_completion_tokens"] = MAX_TOKENS
+    else:
+        payload["temperature"] = TEMPERATURE
+        payload["top_p"] = TOP_P
+        payload["max_tokens"] = MAX_TOKENS
+
+    if json_mode and not is_reasoning_model:
+         # Some reasoning models don't support response_format or require strict schemas
+         # For broad compatibility, we only enable it for standard models.
+         # For reasoning models, we rely on the prompt asking for JSON.
         payload["response_format"] = {"type": "json_object"}
 
     async with httpx.AsyncClient() as http_client:
@@ -272,7 +337,10 @@ async def step1_plan(question: str) -> Dict[str, Any]:
         if not response:
             raise ValueError("Empty response from planner")
 
-        plan = json.loads(response)
+        plan = extract_json_from_text(response)
+
+        if not plan:
+            raise ValueError("Could not extract JSON from response")
 
         # Enforce agent limits (< 10)
         agents = plan.get("agents", [])
@@ -283,8 +351,8 @@ async def step1_plan(question: str) -> Dict[str, Any]:
 
         logger.info(f"📋 ORCHESTRATOR PLAN: {plan}")
         return plan
-    except json.JSONDecodeError:
-        logger.error("Failed to parse JSON plan")
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"Failed to parse JSON plan: {e}")
         # Retry once? Or just fallback to a default plan?
         # Let's return a basic default plan
         return {
