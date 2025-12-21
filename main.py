@@ -5,6 +5,8 @@ import logging
 import secrets
 import time
 import json
+import random
+import httpx
 from typing import Dict, Any, List
 from fastapi import FastAPI, HTTPException, Header, Depends, Form
 from fastapi.responses import HTMLResponse
@@ -28,6 +30,12 @@ load_dotenv()
 app = FastAPI(title="Multi-Agent AI Orchestrator", version="1.0.0")
 client = Cerebras(api_key=os.environ.get("CEREBRAS_API_KEY"))
 templates = Jinja2Templates(directory="templates")
+
+OPENWEBUI_MODELS = [
+    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
+    "moonshotai/kimi-k2:free"
+]
 
 # CSRF Protection
 CSRF_SECRET_KEY = os.getenv("CSRF_SECRET_KEY", secrets.token_hex(32))
@@ -82,18 +90,51 @@ async def call_model(model: str, user_input: str, system_message: str = "", json
     logger.info(f"🤖 AI REQUEST - Model: {model}")
     
     try:
-        response_format = {"type": "json_object"} if json_mode else None
+        if model in OPENWEBUI_MODELS:
+            openwebui_key = os.getenv("OPENWEBUI_KEY")
+            openwebui_base = os.getenv("OPENWEBUI_BASE")
 
-        chat_completion = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            stream=False,
-            response_format=response_format
-        )
-        content = chat_completion.choices[0].message.content
+            if not openwebui_key or not openwebui_base:
+                raise ValueError("OPENWEBUI_KEY or OPENWEBUI_BASE not set")
+
+            headers = {
+                "Authorization": f"Bearer {openwebui_key}",
+                "Content-Type": "application/json"
+            }
+
+            url = openwebui_base.rstrip("/")
+            if not url.endswith("/chat/completions"):
+                 url = f"{url}/chat/completions"
+
+            payload = {
+                "model": model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "top_p": top_p
+            }
+
+            if json_mode:
+                payload["response_format"] = {"type": "json_object"}
+
+            async with httpx.AsyncClient() as http_client:
+                resp = await http_client.post(url, headers=headers, json=payload, timeout=60.0)
+                resp.raise_for_status()
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+        else:
+            response_format = {"type": "json_object"} if json_mode else None
+
+            chat_completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                stream=False,
+                response_format=response_format
+            )
+            content = chat_completion.choices[0].message.content
 
         if content is None:
             logger.warning(f"⚠️ Model {model} returned None content.")
@@ -140,13 +181,18 @@ async def step2_execute(agents: List[Dict[str, str]], question: str) -> Dict[str
     for agent in agents:
         name = agent.get("name", "Unknown Agent")
         role = agent.get("role", "Helpful Assistant")
-        model = agent.get("model", "zai-glm-4.6")
+        # Randomly select a specialist model for the agent
+        model = random.choice(OPENWEBUI_MODELS)
 
         agent_names.append(name)
+        # Store the selected model in the agent dict for reference/logging if needed,
+        # but strictly we only need to pass it to call_model.
+        # Note: The 'plan' object passed to synthesis will still have the old model name
+        # unless we update it in the 'agents' list.
+        agent['model'] = model
 
         system_msg = f"You are {name}. Role: {role}. Question: {question}. Answer concisely and professionally."
-        # If model is zai-glm-4.6, we try it, but if it fails/returns empty, we might need fallback logic.
-        # But for now, just call it.
+
         tasks.append(call_model(model, question, system_message=system_msg))
     
     results = await asyncio.gather(*tasks, return_exceptions=True)
