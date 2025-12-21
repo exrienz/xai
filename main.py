@@ -5,6 +5,8 @@ import logging
 import secrets
 import time
 import json
+import random
+import httpx
 from typing import Dict, Any, List
 from fastapi import FastAPI, HTTPException, Header, Depends, Form
 from fastapi.responses import HTMLResponse
@@ -24,6 +26,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+OPENWEBUI_MODELS = [
+    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
+    "moonshotai/kimi-k2:free"
+]
+FALLBACK_MODEL = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
+ORCHESTRATOR_MODEL = "gpt-oss-120b"
 
 app = FastAPI(title="Multi-Agent AI Orchestrator", version="1.0.0")
 client = Cerebras(api_key=os.environ.get("CEREBRAS_API_KEY"))
@@ -68,7 +78,59 @@ async def verify_api_key(code_x_key: str = Header(..., alias="code-x-key")):
         raise HTTPException(status_code=401, detail="Invalid API key")
     return code_x_key
 
-async def call_model(model: str, user_input: str, system_message: str = "", json_mode: bool = False) -> str:
+def is_censored(text: str) -> bool:
+    """Check if the response text indicates censorship/refusal."""
+    censorship_phrases = [
+        "I cannot", "I am unable", "I'm sorry", "As an AI",
+        "I can't", "cannot fulfill", "cannot comply", "against my programming"
+    ]
+    # Check mostly beginning of response
+    lower_text = text[:200].lower()
+    for phrase in censorship_phrases:
+        if phrase.lower() in lower_text:
+            return True
+    return False
+
+async def call_openwebui(model: str, messages: List[Dict[str, str]], json_mode: bool) -> str:
+    api_base = os.getenv("OPENWEBUI_BASE", "")
+    api_key = os.getenv("OPENWEBUI_KEY", "")
+
+    if not api_base:
+        raise ValueError("OPENWEBUI_BASE not set")
+
+    # Construct URL assuming OpenAI compatible endpoint if not specified
+    if "chat/completions" not in api_base:
+        url = f"{api_base.rstrip('/')}/chat/completions"
+        # Some users might set base to .../v1
+        if "/v1" not in api_base and "/api" not in api_base:
+             # Heuristic: try adding /api/chat/completions if it looks like a bare host
+             # But let's stick to standard append for now
+             pass
+    else:
+        url = api_base
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": float(os.getenv("TEMPERATURE", "0.7")),
+        "top_p": float(os.getenv("TOP_P", "0.8"))
+    }
+
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+
+    async with httpx.AsyncClient() as http_client:
+        response = await http_client.post(url, headers=headers, json=payload, timeout=60.0)
+        response.raise_for_status()
+        result = response.json()
+        return result["choices"][0]["message"]["content"]
+
+async def call_model(model: str, user_input: str, system_message: str = "", json_mode: bool = False, attempt_fallback: bool = True) -> str:
     # Increase max tokens for complex reasoning
     max_tokens = int(os.getenv("MAX_TOKENS", "4096"))
     temperature = float(os.getenv("TEMPERATURE", "0.7"))
@@ -82,27 +144,42 @@ async def call_model(model: str, user_input: str, system_message: str = "", json
     logger.info(f"🤖 AI REQUEST - Model: {model}")
     
     try:
-        response_format = {"type": "json_object"} if json_mode else None
-
-        chat_completion = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            stream=False,
-            response_format=response_format
-        )
-        content = chat_completion.choices[0].message.content
+        content = ""
+        if model in OPENWEBUI_MODELS or model == FALLBACK_MODEL:
+            content = await call_openwebui(model, messages, json_mode)
+        else:
+            # Default to Cerebras for others (gpt-oss-120b)
+            response_format = {"type": "json_object"} if json_mode else None
+            chat_completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                stream=False,
+                response_format=response_format
+            )
+            content = chat_completion.choices[0].message.content
 
         if content is None:
             logger.warning(f"⚠️ Model {model} returned None content.")
-            return ""
+            content = ""
             
+        # Check for censorship
+        if attempt_fallback and model != FALLBACK_MODEL and is_censored(content):
+            logger.warning(f"🚫 Model {model} censored. Falling back to {FALLBACK_MODEL}")
+            return await call_model(FALLBACK_MODEL, user_input, system_message, json_mode, attempt_fallback=False)
+
         logger.info(f"✅ AI RESPONSE - Model: {model} - Length: {len(content)} chars")
         return content
+
     except Exception as e:
         logger.error(f"❌ AI REQUEST FAILED - Model: {model} Error: {str(e)}")
+
+        if attempt_fallback and model != FALLBACK_MODEL:
+            logger.warning(f"🔄 Error with {model}. Falling back to {FALLBACK_MODEL}")
+            return await call_model(FALLBACK_MODEL, user_input, system_message, json_mode, attempt_fallback=False)
+
         # Don't raise immediately, allow fallback handling in caller if possible,
         # but here we just raise to be caught by specific steps
         raise HTTPException(status_code=500, detail=f"Error calling {model}: {str(e)}")
@@ -140,13 +217,16 @@ async def step2_execute(agents: List[Dict[str, str]], question: str) -> Dict[str
     for agent in agents:
         name = agent.get("name", "Unknown Agent")
         role = agent.get("role", "Helpful Assistant")
-        model = agent.get("model", "zai-glm-4.6")
+
+        # Randomly select a specialist agent model
+        model = random.choice(OPENWEBUI_MODELS)
+        logger.info(f"🎯 Assigned model {model} to agent {name}")
 
         agent_names.append(name)
 
         system_msg = f"You are {name}. Role: {role}. Question: {question}. Answer concisely and professionally."
-        # If model is zai-glm-4.6, we try it, but if it fails/returns empty, we might need fallback logic.
-        # But for now, just call it.
+
+        # call_model handles fallback if error or censored
         tasks.append(call_model(model, question, system_message=system_msg))
     
     results = await asyncio.gather(*tasks, return_exceptions=True)
