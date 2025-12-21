@@ -52,16 +52,10 @@ Create a `.env` file in the project root:
 CEREBRAS_API_KEY=your_cerebras_api_key_here
 CODE_X_KEY=your_custom_api_key_here
 
-# Model Configuration
-# Note: The code strictly enforces gpt-oss-120b for orchestration and zai-glm-4.6 for agents.
-# These variables might be used for fallbacks or configuration if the code allows flexibility.
-
 # API Settings
-MAX_TOKENS=1024
+MAX_TOKENS=4096
 TEMPERATURE=0.7
 TOP_P=0.8
-STREAM=false
-SHOW_MODEL_OUTPUT=false
 
 # Security
 CSRF_SECRET_KEY=your_csrf_secret_key_here
@@ -126,13 +120,13 @@ curl -X POST "http://localhost:2000/ask" \
 {
   "input": "What is quantum computing?",
   "models": {
-    "MODEL1": "Response from Qwen 3 235B...",
-    "MODEL2": "Response from GPT OSS 120B...",
-    "MODEL3": "Response from Llama 4 Maverick..."
+    "Quantum Physicist": "Response from quantum physicist perspective...",
+    "Computer Scientist": "Response from computer scientist perspective...",
+    "Tech Historian": "Response from historical perspective..."
   },
   "judge": {
     "final_answer": "Synthesized response combining the best aspects...",
-    "reasoning": "The synthesis process considered..."
+    "reasoning": "Multi-Agent Orchestration"
   }
 }
 ```
@@ -159,13 +153,9 @@ Health check endpoint.
 |---------------------|-------------|---------|
 | `CEREBRAS_API_KEY` | Cerebras API key | Required |
 | `CODE_X_KEY` | Custom API key for authentication | Required |
-| `MODEL1`, `MODEL2`, `MODEL3` | Primary AI models | See defaults above |
-| `JUDGE` | Judge model for synthesis | See defaults above |
-| `MAX_TOKENS` | Maximum tokens per response | 1024 |
+| `MAX_TOKENS` | Maximum tokens per response | 4096 |
 | `TEMPERATURE` | Model temperature | 0.7 |
 | `TOP_P` | Top-p sampling | 0.8 |
-| `STREAM` | Enable streaming responses | false |
-| `SHOW_MODEL_OUTPUT` | Include individual model responses in API output | false |
 | `CSRF_SECRET_KEY` | CSRF protection secret | Auto-generated |
 
 ## 🔒 Security Features

@@ -160,7 +160,7 @@ Skip if nearing quota
 
 Prefer fewer deep agents over many shallow ones
 
-Model Selection Optimization Task Type Preferred Model Orchestration gpt-oss-120b Expert reasoning llama-3.3-70b Critique / alternate view zai-glm-4.6 (only if quota allows) 3. PRODUCTION-SAFE DOMAIN VARIANTS
+Model Selection Optimization Task Type Preferred Model Orchestration gpt-oss-120b Expert reasoning zai-glm-4.6 Critique / alternate view zai-glm-4.6 (only if quota allows) 3. PRODUCTION-SAFE DOMAIN VARIANTS
 
 These are behavioral overlays automatically applied based on detected domain.
 
