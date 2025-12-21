@@ -35,7 +35,7 @@ The system is designed to be resilient and uncensored by default via fallback.
    - Fallback: `dolphin-mistral-24b-venice-edition` (Uncensored)
 
 2. **Specialist Agents**:
-   - Primary: **Randomly Selected** from `MODEL_POOL_OPENWEBUI` and `MODEL_POOL_CEREBRAS`.
+   - Primary: **Randomly Selected** from `MODEL_POOL_OPENWEBUI`.
    - Fallback: `dolphin-mistral-24b-venice-edition`
 
 ### Fallback Logic
@@ -57,7 +57,6 @@ Create a `.env` file in the project root:
 OPENWEBUI_KEY=your_key_here
 OPENWEBUI_BASE=https://your-openwebui-instance
 
-CEREBRAS_API_KEY=your_cerebras_key_here
 CODE_X_KEY=your_custom_api_key_here
 CSRF_SECRET_KEY=your_secret_key_here
 
@@ -70,8 +69,7 @@ MODEL_SPECIALIST_PRIMARY=random
 MODEL_SPECIALIST_FALLBACK=cognitivecomputations/dolphin-mistral-24b-venice-edition:free
 
 # Model Pools (Comma separated)
-MODEL_POOL_OPENWEBUI=nousresearch/hermes-3-llama-3.1-405b:free,moonshotai/kimi-k2:free,cognitivecomputations/dolphin-mistral-24b-venice-edition:free
-MODEL_POOL_CEREBRAS=gpt-oss-120b,qwen-3-235b-a22b-instruct-250,zai-glm-4.6
+MODEL_POOL_OPENWEBUI=nousresearch/hermes-3-llama-3.1-405b:free,moonshotai/kimi-k2:free,cognitivecomputations/dolphin-mistral-24b-venice-edition:free,gpt-oss-120b,qwen-3-235b-a22b-instruct-250,zai-glm-4.6
 
 # Generation Settings
 MAX_TOKENS=4096
@@ -112,7 +110,6 @@ Main API endpoint. Requires `code-x-key` header.
 | `MODEL_ORCHESTRATOR_PRIMARY` | Main model for planning/synthesis |
 | `MODEL_SPECIALIST_PRIMARY` | "random" for random assignment |
 | `MODEL_POOL_OPENWEBUI` | List of models available via OpenWebUI |
-| `MODEL_POOL_CEREBRAS` | List of Cerebras models (accessed via OpenWebUI) |
 
 ## 🔒 Security
 
