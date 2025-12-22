@@ -1,120 +1,127 @@
-# Multi-Agent AI Orchestrator 🤖
+# Multi-Agent AI Orchestrator
 
-A powerful FastAPI-based service that leverages multiple AI models via an OpenWebUI compatible API to provide superior responses by combining the strengths of different specialized agents through an intelligent orchestration system.
+A powerful FastAPI-based application that coordinates a team of specialized AI agents to answer complex user questions. The system uses a primary orchestrator to analyze queries, plan a team of expert agents, execute them in parallel, and synthesize a final comprehensive answer.
 
-## ✨ Key Features
+## 🚀 Features
 
-- **Multi-Agent Orchestration**: Dynamically recruits and coordinates specialized AI agents based on the query.
-- **Unified API Interface**: All models are accessed via `OPENWEBUI_BASE`, simplifying integration.
-- **Robust Fallback System**:
-  - Primary Orchestrator: `gpt-oss-120b`
-  - Fallback/Uncensored Backstop: `dolphin-mistral-24b-venice-edition`
-  - Retry Logic: If the fallback fails, it retries with other models from the pool.
-- **Transparent Reasoning**: Displays the agent roster, individual responses, cross-analysis, and final synthesis.
-- **Secure Authentication**: API key-based authentication with CSRF protection.
-- **Web Interface**: User-friendly web interface.
-- **Docker Ready**: Full containerization support.
+- **Intelligent Orchestration**: Analyzes questions to determine the necessary domains and agent roles.
+- **Multi-Agent Collaboration**: Spawns 3-9 specialized agents (e.g., Medical Expert, Legal Advisor, Technical Analyst) to reason independently.
+- **Parallel Execution**: Runs agent tasks concurrently for faster response times.
+- **Robust Fallback System**: Automatically switches to backup models if the primary model fails or refuses a request.
+- **Censorship Detection**: Detects and handles refusals/censorship from models.
+- **Dual Interface**:
+  - **Web UI**: Clean, responsive interface for direct interaction.
+  - **REST API**: Full JSON API for integration with other apps.
+- **Customizable Model Pools**: Configure specific models for orchestrators and specialists via environment variables.
 
-## 🏗️ Architecture
+## 🛠️ Prerequisites
 
-```
-User Question → Orchestrator (Plan) → [Agent 1, Agent 2, ...] (Execute) → Orchestrator (Synthesize) → Final Response
-```
+- Python 3.9+
+- [Git](https://git-scm.com/)
+- An OpenWebUI instance (or compatible OpenAI-like API provider)
 
-1. **Plan**: The Orchestrator (`gpt-oss-120b`) analyzes the question and recruits a roster of specialized agents (3-9 agents).
-2. **Execute**: Each recruited agent processes the question. Agents are **randomly assigned** a model from the configured pools.
-3. **Synthesize**: The Orchestrator reviews all agent responses, performs cross-analysis, and produces a final unified answer.
+## 📦 Installation
 
-## 🤖 Model Configuration & Fallback
+1.  **Clone the repository:**
+    ```bash
+    git clone <repository-url>
+    cd xai
+    ```
 
-The system is designed to be resilient and uncensored by default via fallback.
+2.  **Create a virtual environment:**
+    ```bash
+    python -m venv venv
+    source venv/bin/activate  # On Windows: venv\Scripts\activate
+    ```
 
-### Model Hierarchy
-1. **Orchestrator**:
-   - Primary: `gpt-oss-120b`
-   - Fallback: `dolphin-mistral-24b-venice-edition` (Uncensored)
+3.  **Install dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-2. **Specialist Agents**:
-  - Primary: **Randomly Selected** from `MODEL_POOL_OPENWEBUI`.
-   - Fallback: `dolphin-mistral-24b-venice-edition`
+4.  **Configure Environment:**
+    Copy the example environment file and edit it with your API keys and settings.
+    ```bash
+    cp .env.example .env
+    ```
+    
+    Update `.env` with your actual credentials:
+    ```ini
+    OPENWEBUI_KEY=your_actual_api_key
+    OPENWEBUI_BASE=https://your-openwebui-instance
+    ```
 
-### Fallback Logic
-If ANY model (Orchestrator or Specialist):
-1. Returns an error (HTTP 500, timeout, etc.)
-2. Refuses to answer (Censorship detection: "I cannot", "As an AI", etc.)
+## 🏃 Usage
 
-Then:
-- The system immediately switches to the **Venice** model (`dolphin-mistral-24b-venice-edition`).
-- If Venice itself fails, it retries with another random model from the pool.
+### Running Locally
 
-## 🚀 Quick Start
-
-### 1. Environment Configuration
-
-Create a `.env` file in the project root:
-
-```env
-OPENWEBUI_KEY=your_key_here
-OPENWEBUI_BASE=https://your-openwebui-instance
-
-CODE_X_KEY=your_custom_api_key_here
-CSRF_SECRET_KEY=your_secret_key_here
-
-# Orchestrator Configuration
-MODEL_ORCHESTRATOR_PRIMARY=gpt-oss-120b
-MODEL_ORCHESTRATOR_FALLBACK=cognitivecomputations/dolphin-mistral-24b-venice-edition:free
-
-# Specialist Configuration
-MODEL_SPECIALIST_PRIMARY=random
-MODEL_SPECIALIST_FALLBACK=cognitivecomputations/dolphin-mistral-24b-venice-edition:free
-
-# Model Pools (Comma separated)
-MODEL_POOL_OPENWEBUI=nousresearch/hermes-3-llama-3.1-405b:free,moonshotai/kimi-k2:free,cognitivecomputations/dolphin-mistral-24b-venice-edition:free
-
-# Generation Settings
-MAX_TOKENS=4096
-TEMPERATURE=0.7
-TOP_P=0.8
-```
-
-### 2. Deploy with Docker
+Start the development server:
 
 ```bash
-docker-compose up --build
+uvicorn main:app --reload --host 0.0.0.0 --port 2000
 ```
 
-### 3. Local Development
+Access the application at: `http://localhost:2000`
 
-```bash
-pip install -r requirements.txt
-python main.py
-```
+### Running with Docker
 
-## 📚 API Documentation
+1.  **Build the image:**
+    ```bash
+    docker build -t xai-orchestrator .
+    ```
+
+2.  **Run the container:**
+    ```bash
+    docker run -p 2000:2000 --env-file .env xai-orchestrator
+    ```
+    Or use Docker Compose:
+    ```bash
+    docker-compose up -d
+    ```
+
+## 🔌 API Endpoints
 
 ### `POST /ask`
-Main API endpoint. Requires `code-x-key` header.
+Submits a question to the orchestrator via API.
 
+**Headers:**
+- `code-x-key`: (Optional) API key for authentication if configured.
+
+**Request Body:**
 ```json
 {
-  "question": "How do I ...?",
-  "system_message": "Optional system prompt"
+  "question": "Analyze the potential impact of quantum computing on modern cryptography."
 }
 ```
 
-## 🛠️ Configuration Options
+**Response:**
+```json
+{
+  "input": "...",
+  "models": { ... },
+  "judge": {
+    "final_answer": "Markdown formatted final synthesis...",
+    "reasoning": "Multi-Agent Orchestration"
+  }
+}
+```
 
-| Environment Variable | Description |
-|---------------------|-------------|
-| `OPENWEBUI_BASE` | Base URL for the OpenAI-compatible API |
-| `MODEL_ORCHESTRATOR_PRIMARY` | Main model for planning/synthesis |
-| `MODEL_SPECIALIST_PRIMARY` | "random" for random assignment |
-| `MODEL_POOL_OPENWEBUI` | List of models available via OpenWebUI |
+### `GET /`
+Serves the web interface.
 
-## 🔒 Security
+## ⚙️ Configuration
 
-- **Censorship Evasion**: The system automatically falls back to uncensored models if the primary model refuses a request.
-- **Fail-Safe**: Never exposes internal errors to the user; always attempts to answer.
+Key environment variables in `.env`:
 
----
-**Made with ❤️ using FastAPI and OpenWebUI**
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENWEBUI_BASE` | Base URL for the LLM API provider | `""` |
+| `OPENWEBUI_KEY` | API Key for the LLM provider | `""` |
+| `MODEL_ORCHESTRATOR_PRIMARY` | Main model for planning and synthesis | `gpt-oss-120b` |
+| `MODEL_POOL_OPENWEBUI` | Comma-separated list of models for agents to use | (List of available models) |
+| `MAX_TOKENS` | Max generation tokens per request | `4096` |
+| `CODE_X_KEY` | Secret key for API authentication (optional) | `""` |
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.

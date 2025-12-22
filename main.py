@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Header, Depends, Form
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi import Request
+from starlette.middleware.sessions import SessionMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from itsdangerous import URLSafeTimedSerializer
@@ -62,6 +63,18 @@ OPENWEBUI_KEY = os.getenv("OPENWEBUI_KEY", "")
 
 # --- App Setup ---
 app = FastAPI(title="Multi-Agent AI Orchestrator", version="1.0.0")
+
+# Security Headers Middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
+
+# Session Middleware (Required for CSRF)
+# in production, ensure HTTPSOnly and SameSite settings are strict
+app.add_middleware(SessionMiddleware, secret_key=os.getenv("CSRF_SECRET_KEY", secrets.token_hex(32)))
+
 templates = Jinja2Templates(directory="templates")
 
 # CSRF Protection
@@ -69,17 +82,20 @@ CSRF_SECRET_KEY = os.getenv("CSRF_SECRET_KEY", secrets.token_hex(32))
 csrf_serializer = URLSafeTimedSerializer(CSRF_SECRET_KEY)
 
 # --- Helpers ---
-def generate_csrf_token() -> str:
-    """Generate a CSRF token"""
-    return csrf_serializer.dumps({"timestamp": time.time()})
+def generate_csrf_token(request: Request) -> str:
+    """Generate a CSRF token and store it in the session."""
+    token = secrets.token_urlsafe(32)
+    request.session["csrf_token"] = token
+    return token
 
-def validate_csrf_token(token: str, max_age: int = 3600) -> bool:
-    """Validate a CSRF token (expires after max_age seconds)"""
-    try:
-        csrf_serializer.loads(token, max_age=max_age)
-        return True
-    except Exception:
+def validate_csrf_token(request: Request, token: str) -> bool:
+    """Validate a CSRF token against the session."""
+    if not token:
         return False
+    expected_token = request.session.get("csrf_token")
+    if not expected_token:
+        return False
+    return secrets.compare_digest(token, expected_token)
 
 def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     """Extracts JSON from text, handling Markdown code blocks and reasoning traces."""
@@ -124,7 +140,7 @@ def is_censored(text: str) -> bool:
         "policy prohibits", "cannot assist"
     ]
     # Check mostly beginning of response
-    lower_text = text[:300].lower()
+    lower_text = text.lower()
     for phrase in censorship_phrases:
         if phrase.lower() in lower_text:
             return True
@@ -151,10 +167,10 @@ async def verify_api_key(code_x_key: str = Header(..., alias="code-x-key")):
     expected_key = os.getenv("CODE_X_KEY")
     # If not configured, we might skip or fail. Let's fail safe.
     if not expected_key:
-        # If running locally without key, maybe allow?
-        # But instruction implies security.
-        pass
-    if expected_key and code_x_key != expected_key:
+        logger.error("CODE_X_KEY not configured. Refusing request.")
+        raise HTTPException(status_code=500, detail="Server Misconfiguration: API Key not set")
+    
+    if code_x_key != expected_key:
         raise HTTPException(status_code=401, detail="Invalid API key")
     return code_x_key
 
@@ -384,7 +400,7 @@ async def step2_execute(agents: List[Dict[str, str]], question: str) -> Tuple[Di
         agent_models[name] = model
         agent_names.append(name)
 
-        system_msg = f"You are {name}. Role: {role}. Question: {question}. Answer concisely and professionally."
+        system_msg = f"You are {name}. Role: {role}. Answer concisely and professionally."
 
         # call_model handles fallback if error or censored
         tasks.append(call_model(
@@ -506,12 +522,12 @@ async def ask_question(
             }
         )
     except Exception as e:
-        logger.error(f"Ask Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Ask Error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    csrf_token = generate_csrf_token()
+    csrf_token = generate_csrf_token(request)
     return templates.TemplateResponse("index.html", {
         "request": request,
         "csrf_token": csrf_token
@@ -519,18 +535,19 @@ async def index(request: Request):
 
 @app.post("/web-ask", response_model=WebResponse)
 async def web_ask_question(
+    request: Request,
     question: str = Form(...),
     csrf_token: str = Form(...)
 ):
-    if not validate_csrf_token(csrf_token):
+    if not validate_csrf_token(request, csrf_token):
         raise HTTPException(status_code=403, detail="Invalid CSRF token")
     
     try:
         result = await orchestrate(question)
         return WebResponse(response=result["final_answer"])
     except Exception as e:
-        logger.error(f"Web error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Web error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @app.get("/health")
 async def health_check():
