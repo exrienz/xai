@@ -9,7 +9,7 @@ import re
 import httpx
 from typing import Dict, Any, List, Tuple, Optional
 from fastapi import FastAPI, HTTPException, Header, Depends, Form
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi import Request
 from starlette.middleware.sessions import SessionMiddleware
@@ -63,6 +63,15 @@ OPENWEBUI_KEY = os.getenv("OPENWEBUI_KEY", "")
 
 # --- App Setup ---
 app = FastAPI(title="Multi-Agent AI Orchestrator", version="1.0.0")
+
+# Global Exception Handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Global Exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error", "error": str(exc)},
+    )
 
 # Security Headers Middleware
 @app.middleware("http")
@@ -239,6 +248,12 @@ async def call_openwebui(model: str, messages: List[Dict[str, str]], json_mode: 
     async with httpx.AsyncClient() as http_client:
         try:
             response = await http_client.post(url, headers=headers, json=payload, timeout=120.0)
+
+            # Check for HTML content type explicitly
+            content_type = response.headers.get("content-type", "").lower()
+            if "text/html" in content_type:
+                 raise ValueError(f"API returned HTML content (likely error page): {response.text[:200]}...")
+
             response.raise_for_status()
 
             try:
@@ -246,7 +261,7 @@ async def call_openwebui(model: str, messages: List[Dict[str, str]], json_mode: 
             except json.JSONDecodeError as e:
                 # Issue 1: unexpected token '<' often means HTML response.
                 if response.text.strip().startswith("<"):
-                    raise ValueError(f"API returned HTML (likely error page) instead of JSON: {response.text[:100]}...")
+                    raise ValueError(f"API returned HTML (likely error page) instead of JSON: {response.text[:200]}...")
                 raise ValueError(f"Invalid JSON response: {str(e)}")
 
             if not result or "choices" not in result or not result["choices"]:
