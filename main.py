@@ -240,7 +240,15 @@ async def call_openwebui(model: str, messages: List[Dict[str, str]], json_mode: 
         try:
             response = await http_client.post(url, headers=headers, json=payload, timeout=120.0)
             response.raise_for_status()
-            result = response.json()
+
+            try:
+                result = response.json()
+            except json.JSONDecodeError as e:
+                # Issue 1: unexpected token '<' often means HTML response.
+                if response.text.strip().startswith("<"):
+                    raise ValueError(f"API returned HTML (likely error page) instead of JSON: {response.text[:100]}...")
+                raise ValueError(f"Invalid JSON response: {str(e)}")
+
             if not result or "choices" not in result or not result["choices"]:
                 raise ValueError("Invalid response format from API")
             content = result["choices"][0]["message"]["content"]
@@ -300,27 +308,37 @@ async def call_model(
 
         # If we just failed on the fallback target itself, we might need a different strategy
         if model == fallback_target:
-             # If Venice fails, retry with another model from the pool?
-             # Instruction: "If Venice itself fails, the orchestrator must retry with another model from the pool until success."
-             logger.warning(f"⚠️ Fallback model {fallback_target} failed. Retrying with random pool model.")
+             # Issue 2: "In case fallback llm model also fail... auto use random llm model from llm model pool until success"
+             logger.warning(f"⚠️ Fallback model {fallback_target} failed. Retrying with ALL available pool models until success.")
 
-             # Avoid infinite recursion
-             # Try up to 3 times with random models
-             for _ in range(3):
-                 retry_model = get_random_specialist_model()
-                 if retry_model == fallback_target:
-                     continue # Skip the one that just failed
+             # Get unique models from pool
+             retry_candidates = list(dict.fromkeys(MODEL_POOL))
+             # Shuffle to randomize order
+             random.shuffle(retry_candidates)
 
-                 try:
-                     logger.info(f"🔄 Retry with {retry_model}")
-                     content = await call_openwebui(retry_model, messages, json_mode)
-                     if content and not is_censored(content):
-                         return content
-                 except Exception as retry_e:
-                     logger.warning(f"Retry {retry_model} failed: {retry_e}")
+             tried_models = set([model]) # Don't retry the one that just failed
+
+             for retry_model in retry_candidates:
+                 if retry_model in tried_models:
                      continue
 
-             raise HTTPException(status_code=500, detail=f"All fallbacks failed. Last error: {error_msg}")
+                 try:
+                     logger.info(f"🔄 Retry loop with {retry_model}")
+                     content = await call_openwebui(retry_model, messages, json_mode)
+
+                     if content and not is_censored(content):
+                         logger.info(f"✅ Retry success with {retry_model}")
+                         return content
+                     elif is_censored(content):
+                         logger.warning(f"🚫 Retry model {retry_model} was censored.")
+                         tried_models.add(retry_model)
+                 except Exception as retry_e:
+                     logger.warning(f"Retry {retry_model} failed: {retry_e}")
+                     tried_models.add(retry_model)
+                     continue
+
+             # If we exhausted the pool
+             raise HTTPException(status_code=500, detail=f"All fallbacks and retry pool models failed. Last error: {error_msg}")
 
         # Else, try the fallback target
         logger.info(f"🔄 Switching to Fallback: {fallback_target}")
