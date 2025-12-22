@@ -34,7 +34,7 @@ def get_env_list(key: str, default: str = "") -> List[str]:
     return [x.strip() for x in val.split(",") if x.strip()]
 
 # Model Configuration
-MODEL_ORCHESTRATOR_PRIMARY = os.getenv("MODEL_ORCHESTRATOR_PRIMARY", "gpt-oss-120b")
+MODEL_ORCHESTRATOR_PRIMARY = os.getenv("MODEL_ORCHESTRATOR_PRIMARY", "openai/gpt-4o-mini")
 MODEL_ORCHESTRATOR_FALLBACK = os.getenv("MODEL_ORCHESTRATOR_FALLBACK", "cognitivecomputations/dolphin-mistral-24b-venice-edition:free")
 
 MODEL_SPECIALIST_PRIMARY = os.getenv("MODEL_SPECIALIST_PRIMARY", "random")
@@ -48,7 +48,10 @@ MODEL_POOL = list(dict.fromkeys(MODEL_POOL))
 if not MODEL_POOL:
     # Default fallback if env is missing
     MODEL_POOL = [
-        "gpt-oss-120b",
+        "openai/gpt-4o-mini",
+        "deepseek/deepseek-chat-v3.1:free",
+        "qwen/qwen3-235b-a22b:free",
+        "z-ai/glm-4.6",
         "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
     ]
 
