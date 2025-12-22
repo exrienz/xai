@@ -721,7 +721,19 @@
                     body: formData
                 });
 
-                const data = await response.json();
+                let data;
+                const contentType = response.headers.get("content-type");
+                if (contentType && contentType.includes("application/json")) {
+                    data = await response.json();
+                } else {
+                    // Fallback for non-JSON responses (e.g., HTML error pages)
+                    const text = await response.text();
+                    console.error("Non-JSON response received:", text);
+                    if (!response.ok) {
+                        throw new Error(`Server Error (${response.status}): The server returned an invalid response.`);
+                    }
+                    throw new Error("Invalid response format from server.");
+                }
 
                 if (!response.ok) {
                     throw new Error(data.detail || 'An error occurred while processing your question.');
