@@ -413,39 +413,46 @@ async def step3_synthesize(question: str, plan: Dict[str, Any], agent_responses:
     """Synthesize final response using Orchestrator."""
     logger.info("👨‍⚖️ ORCHESTRATOR SYNTHESIS START")
     
-    # Construct agent roster with actual models used
-    agent_roster_lines = []
+    # 1. Construct Agent Roster (Markdown)
+    agent_roster_md = "## 1. Agent Roster\n\n| Agent Name | Role | Model Used |\n|---|---|---|\n"
     for agent in plan.get("agents", []):
         name = agent.get("name", "Unknown Agent")
         role = agent.get("role", "Agent")
-        # Get the actual model used from Step 2, fallback to Unknown if not found
         model_used = agent_models.get(name, "Unknown Model")
-        agent_roster_lines.append(f"- {name} (Role: {role}, Model: {model_used})")
+        agent_roster_md += f"| {name} | {role} | {model_used} |\n"
 
-    agent_roster_str = "\n".join(agent_roster_lines)
-    agent_responses_str = "\n\n".join([f"### {name}\n{resp}" for name, resp in agent_responses.items()])
-    
+    # 2. Construct Individual Agent Responses (Markdown)
+    agent_responses_md = "## 2. Individual Agent Responses\n\n"
+    for name, resp in agent_responses.items():
+        agent_responses_md += f"### {name}\n\n{resp}\n\n"
+
+    # 3. Request Synthesis from Orchestrator
+    # We pass the raw data, but ask the Orchestrator to only produce the Synthesis/Verdict part
     synthesis_input = f"""
 User Question: {question}
 
 Agent Roster:
-{agent_roster_str}
+{agent_roster_md}
 
 Agent Responses:
-{agent_responses_str}
+{agent_responses_md}
 
-Please produce the final output following the 'Output Transparency' rules in the system prompt.
-Must include Agent Roster, Individual Agent Responses, Cross-Analysis, and Final Answer.
+Please produce the 'Synthesis & Final Verdict' section only, based on the above information.
+Do not repeat the Roster or individual responses.
 """
     
-    response = await call_model(
+    synthesis_response = await call_model(
         MODEL_ORCHESTRATOR_PRIMARY,
         synthesis_input,
         system_message=MASTER_SYSTEM_PROMPT,
         attempt_fallback=True,
         is_specialist=False
     )
-    return response
+
+    # 4. Assemble Final Output
+    final_output = f"{agent_roster_md}\n{agent_responses_md}\n## 3. Synthesis & Final Verdict\n\n{synthesis_response}"
+
+    return final_output
 
 async def orchestrate(question: str) -> Dict[str, Any]:
     # Step 1: Plan
