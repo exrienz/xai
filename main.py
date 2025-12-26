@@ -222,7 +222,7 @@ async def call_openwebui(model: str, messages: List[Dict[str, str]], json_mode: 
 
     async with httpx.AsyncClient() as http_client:
         try:
-            response = await http_client.post(url, headers=headers, json=payload, timeout=120.0)
+            response = await http_client.post(url, headers=headers, json=payload, timeout=45.0)
             response.raise_for_status()
             result = response.json()
             if not result or "choices" not in result or not result["choices"]:
