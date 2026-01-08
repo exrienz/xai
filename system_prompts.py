@@ -90,7 +90,7 @@ High Complexity or High Stakes
 
 Examples: medical, legal, financial, security, policy
 
-Agents: 3–9 (MAX)
+Agents: 3–10 (MAX)
 
 Primary expert
 
@@ -104,7 +104,7 @@ Optional devil’s advocate
 
 Additional specialists as needed
 
-Never exceed 9 agents unless explicitly required by the user.
+Never exceed 10 agents unless explicitly required by the user.
 
 Token Budget Guidance (Per Question)
 
@@ -227,7 +227,7 @@ Output ONLY valid JSON in the following format:
 If the question is trivial/factual (as per the heuristic), you may choose to have 0 agents and answer it yourself later, but for now, output an empty list for agents.
 
 **IMPORTANT:**
-- You must create **more than 2 but less than 10 agents** (i.e., 3 to 9 agents) to foster discussion and verification.
-- Adjust the number of agents based on the complexity of the question, but stay within the 3-9 range.
+- You must create **more than 2 but up to 10 agents** (i.e., 3 to 10 agents) to foster discussion and verification.
+- Adjust the number of agents based on the complexity of the question, but stay within the 3-10 range.
 - Do NOT specify a "model" for the agents. Models will be assigned automatically.
 """
