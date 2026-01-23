@@ -7,10 +7,11 @@ A powerful FastAPI-based application that coordinates a team of specialized AI a
 - **Intelligent Orchestration**: Analyzes questions to determine the necessary domains and agent roles.
 - **Multi-Agent Collaboration**: Spawns 3-9 specialized agents (e.g., Medical Expert, Legal Advisor, Technical Analyst) to reason independently.
 - **Parallel Execution**: Runs agent tasks concurrently for faster response times.
+- **Follow-up Questions**: 🆕 Continue conversations after the final verdict by asking follow-up questions while preserving context.
 - **Robust Fallback System**: Automatically switches to backup models if the primary model fails or refuses a request.
 - **Censorship Detection**: Detects and handles refusals/censorship from models.
 - **Dual Interface**:
-  - **Web UI**: Clean, responsive interface for direct interaction.
+  - **Web UI**: Clean, responsive interface for direct interaction with follow-up support.
   - **REST API**: Full JSON API for integration with other apps.
 - **Customizable Model Pools**: Configure specific models for orchestrators and specialists via environment variables.
 
@@ -109,6 +110,74 @@ Submits a question to the orchestrator via API.
 ### `GET /`
 Serves the web interface.
 
+### `POST /web-followup`
+Submits a follow-up question to continue a conversation.
+
+**Form Data:**
+- `question`: The follow-up question
+- `conversation_id`: ID of the previous conversation to continue from
+- `csrf_token`: CSRF token for security
+
+**Response:**
+```json
+{
+  "response": "Markdown formatted answer with preserved context...",
+  "conversation_id": "new-conversation-uuid",
+  "parent_conversation_id": "parent-conversation-uuid"
+}
+```
+
+### `GET /conversation/{conversation_id}`
+Retrieve the full history of a conversation.
+
+**Response:**
+```json
+{
+  "id": "conversation-uuid",
+  "messages": [
+    {"role": "user", "content": "...", "timestamp": "..."},
+    {"role": "assistant", "content": "...", "timestamp": "..."}
+  ],
+  "verdict_content": "## 3. Synthesis & Final Verdict\n...",
+  "created_at": "...",
+  "last_updated": "...",
+  "parent_conversation_id": "..."
+}
+```
+
+## 💬 Follow-up Questions
+
+The application now supports multi-turn conversations with context preservation:
+
+### How It Works
+
+1. **Initial Question**: Submit your question through the web interface or API
+2. **Final Verdict**: Once the "## 3. Synthesis & Final Verdict" section is generated, a follow-up input appears
+3. **Ask Follow-ups**: Type your follow-up question in the dedicated section below the response
+4. **Context Preservation**: The system automatically creates a new conversation seeded with the previous verdict content
+5. **Continuous Chain**: Each follow-up creates a new conversation linked to its parent, preserving the conversation chain
+
+### Features
+
+- **Automatic Context Seeding**: Follow-up questions include the previous verdict as context
+- **Smart Truncation**: Context is intelligently truncated to prevent excessive prompt growth (configurable via `MAX_CONVERSATION_CONTEXT_LENGTH`)
+- **Conversation Chains**: Each follow-up maintains a link to its parent conversation
+- **Auto-Cleanup**: Old conversations are automatically removed after 24 hours (configurable via `CONVERSATION_TIMEOUT_HOURS`)
+- **Feature Flag**: Can be enabled/disabled via environment variable for safe rollout
+
+### Usage Tips
+
+- Use follow-ups to dive deeper into specific aspects of the answer
+- Ask clarifying questions without losing the original context
+- Request examples or elaborations on specific points
+- **Keyboard Shortcut**: Press `Ctrl+Enter` in the follow-up input to submit
+
+### Limitations
+
+- Context is limited to the "## 3. Synthesis & Final Verdict" section (not the full conversation history)
+- Maximum context length is enforced to prevent excessive costs and latency
+- Conversations are stored in-memory (will be lost on server restart until database persistence is implemented)
+
 ## ⚙️ Configuration
 
 Key environment variables in `.env`:
@@ -121,6 +190,9 @@ Key environment variables in `.env`:
 | `MODEL_POOL_OPENWEBUI` | Comma-separated list of models for agents to use | (List of available models) |
 | `MAX_TOKENS` | Max generation tokens per request | `4096` |
 | `CODE_X_KEY` | Secret key for API authentication (optional) | `""` |
+| `ENABLE_FOLLOWUP_QUESTIONS` | Enable/disable follow-up questions feature | `true` |
+| `MAX_CONVERSATION_CONTEXT_LENGTH` | Max characters of context to preserve in follow-ups | `8000` |
+| `CONVERSATION_TIMEOUT_HOURS` | Hours before old conversations are auto-cleaned | `24` |
 
 ## 🤝 Contributing
 

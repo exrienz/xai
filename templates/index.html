@@ -492,6 +492,101 @@
             box-shadow: 0 4px 6px rgba(37, 99, 235, 0.05);
         }
 
+        .alert-success {
+            background: #f0fdf4;
+            color: #16a34a;
+            border-left: 4px solid #16a34a;
+            box-shadow: 0 4px 6px rgba(22, 163, 74, 0.05);
+        }
+
+        /* Follow-up Question Section */
+        .followup-section {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: #f8fafc;
+            border-radius: 16px;
+            border: 2px dashed #cbd5e1;
+            transition: all 0.3s ease;
+        }
+
+        .followup-section:hover {
+            border-color: #6366f1;
+            background: #f1f5f9;
+        }
+
+        .followup-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+            font-weight: 600;
+            color: #475569;
+            font-size: 1rem;
+        }
+
+        .followup-header i {
+            color: #6366f1;
+            font-size: 1.2rem;
+        }
+
+        .conversation-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-left: auto;
+        }
+
+        .followup-form {
+            display: flex;
+            gap: 0.75rem;
+            align-items: flex-start;
+        }
+
+        .followup-input {
+            flex: 1;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 0.75rem 1rem;
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+            background: white;
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .followup-input:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+
+        .btn-followup {
+            background: var(--secondary-gradient);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .btn-followup:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(6, 182, 212, 0.3);
+        }
+
+        .btn-followup:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         /* Animations */
         .fade-in {
             animation: fadeIn 0.5s ease-out;
@@ -658,10 +753,32 @@
                                 </div>
                             </div>
 
+                            <!-- Follow-up Question Section -->
+                            <div class="followup-section" id="followupSection" style="display: none;">
+                                <div class="followup-header">
+                                    <i class="bi bi-chat-left-text-fill"></i>
+                                    <span>Ask a Follow-up Question</span>
+                                    <span class="conversation-badge" id="conversationBadge">
+                                        <i class="bi bi-link-45deg"></i> Conversation Active
+                                    </span>
+                                </div>
+                                <div class="followup-form">
+                                    <textarea
+                                        class="followup-input"
+                                        id="followupInput"
+                                        placeholder="Your follow-up question (context from previous answer will be preserved)..."
+                                        rows="2"
+                                    ></textarea>
+                                    <button class="btn btn-followup" id="followupBtn" onclick="submitFollowUp()">
+                                        <i class="bi bi-arrow-right-circle me-2"></i>Submit
+                                    </button>
+                                </div>
+                            </div>
+
                             <!-- Alerts -->
                             <div class="alert alert-custom alert-info" id="newQuestionNotice" style="display: none;">
                                 <i class="bi bi-info-circle me-2"></i>
-                                <strong>Ready for another question?</strong> Click "New Question" to ask something else.
+                                <strong>Ready for another question?</strong> Click "New Question" to ask something else, or use the follow-up section below to continue the conversation.
                             </div>
 
                             <div class="alert alert-custom alert-error" id="error" style="display: none;">
@@ -681,6 +798,7 @@
     <script>
         let questionAsked = false;
         let lastQuestion = '';
+        let currentConversationId = null;
 
         async function submitQuestion(isRetry = false) {
             const question = document.getElementById('question').value.trim();
@@ -757,6 +875,21 @@
                 newQuestionNotice.style.display = 'block';
                 newQuestionNotice.classList.add('fade-in');
 
+                // Store conversation ID if provided
+                if (data.conversation_id) {
+                    currentConversationId = data.conversation_id;
+                    console.log('Conversation ID stored:', currentConversationId);
+                }
+
+                // Show follow-up section if verdict is present
+                if (data.response.includes('## 3. Synthesis & Final Verdict')) {
+                    const followupSection = document.getElementById('followupSection');
+                    if (followupSection) {
+                        followupSection.style.display = 'block';
+                        followupSection.classList.add('fade-in');
+                    }
+                }
+
                 // Mark question as asked and update UI
                 if (!isRetry) {
                     questionAsked = true;
@@ -804,6 +937,7 @@
         function resetForm() {
             questionAsked = false;
             lastQuestion = '';
+            currentConversationId = null;
             const question = document.getElementById('question');
             const submitBtn = document.getElementById('submitBtn');
             const retryBtn = document.getElementById('retryBtn');
@@ -811,6 +945,8 @@
             const responseContainer = document.getElementById('responseContainer');
             const newQuestionNotice = document.getElementById('newQuestionNotice');
             const errorDiv = document.getElementById('error');
+            const followupSection = document.getElementById('followupSection');
+            const followupInput = document.getElementById('followupInput');
 
             question.value = '';
             question.disabled = false;
@@ -823,11 +959,118 @@
             responseContainer.style.display = 'none';
             newQuestionNotice.style.display = 'none';
             errorDiv.style.display = 'none';
+            followupSection.style.display = 'none';
+            followupInput.value = '';
 
             // Add focus animation
             question.classList.add('fade-in');
             setTimeout(() => question.classList.remove('fade-in'), 500);
         }
+
+        async function submitFollowUp() {
+            const followupInput = document.getElementById('followupInput');
+            const followupQuestion = followupInput.value.trim();
+
+            if (!followupQuestion) {
+                showError('Please enter a follow-up question.');
+                return;
+            }
+
+            if (!currentConversationId) {
+                showError('No conversation context found. Please start a new question.');
+                return;
+            }
+
+            const followupBtn = document.getElementById('followupBtn');
+            const loading = document.getElementById('loading');
+            const responseContainer = document.getElementById('responseContainer');
+            const errorDiv = document.getElementById('error');
+
+            // Show loading state
+            loading.style.display = 'block';
+            loading.classList.add('fade-in');
+            followupBtn.disabled = true;
+            responseContainer.style.display = 'none';
+            errorDiv.style.display = 'none';
+
+            try {
+                // Create form data with CSRF token
+                const formData = new FormData();
+                formData.append('question', followupQuestion);
+                formData.append('conversation_id', currentConversationId);
+                formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+
+                const response = await fetch('/web-followup', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                let data;
+                const contentType = response.headers.get("content-type");
+                if (contentType && contentType.includes("application/json")) {
+                    data = await response.json();
+                } else {
+                    const text = await response.text();
+                    console.error("Non-JSON response received:", text);
+                    if (!response.ok) {
+                        throw new Error(`Server Error (${response.status}): The server returned an invalid response.`);
+                    }
+                    throw new Error("Invalid response format from server.");
+                }
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'An error occurred while processing your follow-up question.');
+                }
+
+                // Hide loading and display response
+                loading.style.display = 'none';
+                document.getElementById('responseContent').innerHTML = marked.parse(data.response);
+                responseContainer.style.display = 'block';
+                responseContainer.querySelector('.response-card').classList.add('slide-up');
+
+                // Update conversation ID to the new one
+                if (data.conversation_id) {
+                    currentConversationId = data.conversation_id;
+                    console.log('Follow-up conversation ID stored:', currentConversationId);
+                }
+
+                // Clear the follow-up input
+                followupInput.value = '';
+
+                // Scroll to response
+                responseContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+                // Show success message briefly
+                const successMsg = document.createElement('div');
+                successMsg.className = 'alert alert-custom alert-success fade-in';
+                successMsg.innerHTML = '<i class="bi bi-check-circle me-2"></i>Follow-up answer generated successfully!';
+                document.getElementById('followupSection').insertAdjacentElement('beforebegin', successMsg);
+
+                setTimeout(() => {
+                    successMsg.style.display = 'none';
+                    successMsg.remove();
+                }, 3000);
+
+            } catch (error) {
+                showError('Follow-up Error: ' + error.message, false);
+            } finally {
+                loading.style.display = 'none';
+                followupBtn.disabled = false;
+            }
+        }
+
+        // Add Enter key support for follow-up (Ctrl+Enter to submit)
+        document.addEventListener('DOMContentLoaded', function () {
+            const followupInput = document.getElementById('followupInput');
+            if (followupInput) {
+                followupInput.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter' && e.ctrlKey) {
+                        e.preventDefault();
+                        submitFollowUp();
+                    }
+                });
+            }
+        });
 
         function showError(message, showRetry = false) {
             const errorDiv = document.getElementById('error');

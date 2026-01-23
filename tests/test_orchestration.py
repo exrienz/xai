@@ -52,7 +52,15 @@ class TestOrchestration(unittest.IsolatedAsyncioTestCase):
         mock_call_openwebui.return_value = "Final Answer"
 
         final = await step3_synthesize("Test question", plan, responses, agent_models)
-        self.assertEqual(final, "Final Answer")
+
+        # step3_synthesize returns the full output with roster, responses, and synthesis
+        self.assertIn("## 1. Agent Roster", final)
+        self.assertIn("## 2. Individual Agent Responses", final)
+        self.assertIn("## 3. Synthesis & Final Verdict", final)
+        self.assertIn("Final Answer", final)
+        self.assertIn("Agent1", final)
+        self.assertIn("Role1", final)
+        self.assertIn("test-model", final)
 
 if __name__ == '__main__':
     unittest.main()
