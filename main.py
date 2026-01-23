@@ -7,6 +7,8 @@ import json
 import random
 import re
 import httpx
+import uuid
+from datetime import datetime
 from typing import Dict, Any, List, Tuple, Optional
 from fastapi import FastAPI, HTTPException, Header, Depends, Form
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -61,8 +63,31 @@ TOP_P = float(os.getenv("TOP_P", "0.8"))
 OPENWEBUI_BASE = os.getenv("OPENWEBUI_BASE", "")
 OPENWEBUI_KEY = os.getenv("OPENWEBUI_KEY", "")
 
+# Follow-up Questions Feature Configuration
+ENABLE_FOLLOWUP_QUESTIONS = os.getenv("ENABLE_FOLLOWUP_QUESTIONS", "true").lower() in ["true", "1", "yes"]
+MAX_CONVERSATION_CONTEXT_LENGTH = int(os.getenv("MAX_CONVERSATION_CONTEXT_LENGTH", "8000"))  # chars
+CONVERSATION_TIMEOUT_HOURS = int(os.getenv("CONVERSATION_TIMEOUT_HOURS", "24"))  # Auto-cleanup old conversations
+
 # --- App Setup ---
-app = FastAPI(title="Multi-Agent AI Orchestrator", version="1.0.0")
+app = FastAPI(title="Multi-Agent AI Orchestrator", version="1.1.0")
+
+# --- Conversation Storage ---
+# In-memory conversation storage (designed to be DB-compatible)
+# Key: conversation_id (UUID), Value: Conversation dict
+conversations_store: Dict[str, Dict[str, Any]] = {}
+
+class ConversationMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+    timestamp: datetime
+
+class Conversation(BaseModel):
+    id: str
+    messages: List[ConversationMessage]
+    verdict_content: Optional[str] = None  # Cached verdict for quick access
+    created_at: datetime
+    last_updated: datetime
+    parent_conversation_id: Optional[str] = None  # For tracking continuation chains
 
 # Global Exception Handler
 @app.exception_handler(Exception)
@@ -155,6 +180,122 @@ def is_censored(text: str) -> bool:
             return True
     return False
 
+# --- Conversation Management Helpers ---
+
+def generate_conversation_id() -> str:
+    """Generate a unique conversation ID."""
+    return str(uuid.uuid4())
+
+def extract_verdict_from_response(response: str) -> Optional[str]:
+    """
+    Extract the '## 3. Synthesis & Final Verdict' section from the response.
+    Returns the verdict content (including the heading) or None if not found.
+    """
+    # Look for the verdict section marker
+    verdict_marker = "## 3. Synthesis & Final Verdict"
+
+    if verdict_marker not in response:
+        logger.warning("Verdict section not found in response")
+        return None
+
+    # Extract everything from the verdict marker onwards
+    verdict_start = response.find(verdict_marker)
+    verdict_content = response[verdict_start:].strip()
+
+    return verdict_content
+
+def create_conversation(question: str, response: str, parent_id: Optional[str] = None) -> str:
+    """
+    Create a new conversation and store it.
+    Returns the conversation ID.
+    """
+    conv_id = generate_conversation_id()
+    now = datetime.utcnow()
+
+    # Extract verdict from response
+    verdict = extract_verdict_from_response(response)
+
+    conversation = {
+        "id": conv_id,
+        "messages": [
+            {"role": "user", "content": question, "timestamp": now.isoformat()},
+            {"role": "assistant", "content": response, "timestamp": now.isoformat()}
+        ],
+        "verdict_content": verdict,
+        "created_at": now.isoformat(),
+        "last_updated": now.isoformat(),
+        "parent_conversation_id": parent_id
+    }
+
+    conversations_store[conv_id] = conversation
+    logger.info(f"📝 Created conversation {conv_id} (parent: {parent_id})")
+
+    return conv_id
+
+def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve a conversation by ID."""
+    return conversations_store.get(conversation_id)
+
+def add_message_to_conversation(conversation_id: str, role: str, content: str):
+    """Add a message to an existing conversation."""
+    conv = conversations_store.get(conversation_id)
+    if not conv:
+        logger.error(f"Conversation {conversation_id} not found")
+        return
+
+    now = datetime.utcnow()
+    conv["messages"].append({
+        "role": role,
+        "content": content,
+        "timestamp": now.isoformat()
+    })
+    conv["last_updated"] = now.isoformat()
+
+    # Update verdict if this is an assistant message
+    if role == "assistant":
+        verdict = extract_verdict_from_response(content)
+        if verdict:
+            conv["verdict_content"] = verdict
+
+def truncate_context(context: str, max_length: int = MAX_CONVERSATION_CONTEXT_LENGTH) -> str:
+    """
+    Truncate context to prevent excessive prompt growth.
+    Keeps the most important parts and truncates from the middle if needed.
+    """
+    if len(context) <= max_length:
+        return context
+
+    logger.warning(f"Context truncated from {len(context)} to {max_length} chars")
+
+    # Keep the beginning and end, truncate the middle
+    keep_length = max_length // 2
+    truncated = (
+        context[:keep_length] +
+        f"\n\n[... {len(context) - max_length} characters truncated for brevity ...]\n\n" +
+        context[-keep_length:]
+    )
+
+    return truncated
+
+def cleanup_old_conversations():
+    """Remove conversations older than CONVERSATION_TIMEOUT_HOURS."""
+    now = datetime.utcnow()
+    to_remove = []
+
+    for conv_id, conv in conversations_store.items():
+        created_at = datetime.fromisoformat(conv["created_at"])
+        age_hours = (now - created_at).total_seconds() / 3600
+
+        if age_hours > CONVERSATION_TIMEOUT_HOURS:
+            to_remove.append(conv_id)
+
+    for conv_id in to_remove:
+        del conversations_store[conv_id]
+        logger.info(f"🧹 Cleaned up old conversation {conv_id}")
+
+    if to_remove:
+        logger.info(f"🧹 Cleaned up {len(to_remove)} old conversations")
+
 # --- Models ---
 class QuestionRequest(BaseModel):
     question: str
@@ -170,6 +311,16 @@ class WebQuestionRequest(BaseModel):
 
 class WebResponse(BaseModel):
     response: str
+    conversation_id: Optional[str] = None
+
+class FollowUpRequest(BaseModel):
+    question: str
+    conversation_id: Optional[str] = None  # If provided, continue from this conversation
+
+class FollowUpResponse(BaseModel):
+    response: str
+    conversation_id: str
+    parent_conversation_id: Optional[str] = None
 
 # --- API Interaction ---
 async def verify_api_key(code_x_key: str = Header(..., alias="code-x-key")):
@@ -503,10 +654,32 @@ Do not repeat the Roster or individual responses.
 
     return final_output
 
-async def orchestrate(question: str) -> Dict[str, Any]:
+async def orchestrate(question: str, context: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Orchestrate the multi-agent response.
+
+    Args:
+        question: The user's question
+        context: Optional context from previous conversation (e.g., verdict content)
+
+    Returns:
+        Dict with final_answer, models, and plan
+    """
+    # If context is provided, prepend it to the question for all steps
+    enhanced_question = question
+    if context:
+        context_truncated = truncate_context(context)
+        enhanced_question = f"""Previous Context:
+{context_truncated}
+
+New Question: {question}
+
+Please answer the new question taking into account the previous context."""
+        logger.info(f"🔗 Using conversation context ({len(context_truncated)} chars)")
+
     # Step 1: Plan
-    plan = await step1_plan(question)
-    
+    plan = await step1_plan(enhanced_question)
+
     # Step 2: Execute
     agents = plan.get("agents", [])
     if not agents:
@@ -514,7 +687,7 @@ async def orchestrate(question: str) -> Dict[str, Any]:
         logger.info("ℹ️ No agents needed or planning failed. Direct answer.")
         direct_response = await call_model(
             MODEL_ORCHESTRATOR_PRIMARY,
-            question,
+            enhanced_question,
             system_message=MASTER_SYSTEM_PROMPT,
             attempt_fallback=True,
             is_specialist=False
@@ -524,12 +697,12 @@ async def orchestrate(question: str) -> Dict[str, Any]:
             "models": {},
             "plan": plan
         }
-    
-    agent_responses, agent_models = await step2_execute(agents, question)
-    
+
+    agent_responses, agent_models = await step2_execute(agents, enhanced_question)
+
     # Step 3: Synthesize
-    final_output = await step3_synthesize(question, plan, agent_responses, agent_models)
-    
+    final_output = await step3_synthesize(enhanced_question, plan, agent_responses, agent_models)
+
     return {
         "final_answer": final_output,
         "models": agent_responses,
@@ -574,17 +747,105 @@ async def web_ask_question(
 ):
     if not validate_csrf_token(request, csrf_token):
         raise HTTPException(status_code=403, detail="Invalid CSRF token")
-    
+
     try:
+        # Cleanup old conversations periodically
+        cleanup_old_conversations()
+
         result = await orchestrate(question)
-        return WebResponse(response=result["final_answer"])
+        response_content = result["final_answer"]
+
+        # Create conversation if follow-up feature is enabled
+        conversation_id = None
+        if ENABLE_FOLLOWUP_QUESTIONS:
+            conversation_id = create_conversation(question, response_content)
+
+        return WebResponse(
+            response=response_content,
+            conversation_id=conversation_id
+        )
     except Exception as e:
         logger.error(f"Web error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
+@app.post("/web-followup", response_model=FollowUpResponse)
+async def web_followup_question(
+    request: Request,
+    question: str = Form(...),
+    conversation_id: str = Form(...),
+    csrf_token: str = Form(...)
+):
+    """
+    Handle follow-up questions by creating a new conversation seeded with
+    the verdict from the previous conversation.
+    """
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+
+    if not ENABLE_FOLLOWUP_QUESTIONS:
+        raise HTTPException(status_code=400, detail="Follow-up questions feature is disabled")
+
+    try:
+        # Cleanup old conversations periodically
+        cleanup_old_conversations()
+
+        # Retrieve the parent conversation
+        parent_conv = get_conversation(conversation_id)
+        if not parent_conv:
+            logger.warning(f"Parent conversation {conversation_id} not found, treating as new question")
+            # Fall back to regular question handling
+            result = await orchestrate(question)
+            response_content = result["final_answer"]
+            new_conv_id = create_conversation(question, response_content)
+            return FollowUpResponse(
+                response=response_content,
+                conversation_id=new_conv_id,
+                parent_conversation_id=None
+            )
+
+        # Extract verdict content for context
+        verdict_context = parent_conv.get("verdict_content")
+        if not verdict_context:
+            logger.warning(f"No verdict found in conversation {conversation_id}, using last assistant message")
+            # Fallback to using the last assistant message
+            for msg in reversed(parent_conv["messages"]):
+                if msg["role"] == "assistant":
+                    verdict_context = msg["content"]
+                    break
+
+        # Orchestrate with context
+        logger.info(f"🔄 Processing follow-up for conversation {conversation_id}")
+        result = await orchestrate(question, context=verdict_context)
+        response_content = result["final_answer"]
+
+        # Create new conversation with parent link
+        new_conv_id = create_conversation(question, response_content, parent_id=conversation_id)
+
+        return FollowUpResponse(
+            response=response_content,
+            conversation_id=new_conv_id,
+            parent_conversation_id=conversation_id
+        )
+
+    except Exception as e:
+        logger.error(f"Follow-up error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+@app.get("/conversation/{conversation_id}")
+async def get_conversation_history(conversation_id: str):
+    """Retrieve a conversation's history."""
+    if not ENABLE_FOLLOWUP_QUESTIONS:
+        raise HTTPException(status_code=400, detail="Follow-up questions feature is disabled")
+
+    conv = get_conversation(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    return conv
+
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy", "followup_enabled": ENABLE_FOLLOWUP_QUESTIONS}
 
 if __name__ == "__main__":
     import uvicorn
