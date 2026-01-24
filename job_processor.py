@@ -78,15 +78,25 @@ class JobProcessor:
 
                 # Execute the orchestration
                 try:
-                    response = await self.orchestrate_func(question)
+                    result = await self.orchestrate_func(question)
                     logger.info(f"Job {job_id} completed successfully")
 
-                    # Update status to COMPLETED with response
+                    # Handle both old format (string) and new format (dict with response and conversation_id)
+                    if isinstance(result, dict):
+                        response_content = result.get("response", "")
+                        conversation_id = result.get("conversation_id")
+                    else:
+                        # Backwards compatibility: if result is a string, use it directly
+                        response_content = result
+                        conversation_id = None
+
+                    # Update status to COMPLETED with response and conversation_id
                     await update_job_status(
                         session,
                         job_id,
                         JobStatus.COMPLETED,
-                        response_content=response
+                        response_content=response_content,
+                        conversation_id=conversation_id
                     )
 
                 except Exception as orchestration_error:
