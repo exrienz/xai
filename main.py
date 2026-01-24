@@ -8,9 +8,9 @@ import random
 import re
 import httpx
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, List, Tuple, Optional
-from fastapi import FastAPI, HTTPException, Header, Depends, Form
+from fastapi import FastAPI, HTTPException, Header, Depends, Form, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi import Request
@@ -19,6 +19,14 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from itsdangerous import URLSafeTimedSerializer
 from system_prompts import MASTER_SYSTEM_PROMPT, PLANNING_PROMPT
+
+# Async job processing imports
+from database import (
+    init_db, async_session_factory, create_async_job,
+    get_job_by_slug, update_job_status, cleanup_expired_jobs,
+    get_job_stats, JobStatus, AsyncJob
+)
+from job_processor import JobProcessor
 
 # Configure logging
 logging.basicConfig(
@@ -68,8 +76,12 @@ ENABLE_FOLLOWUP_QUESTIONS = os.getenv("ENABLE_FOLLOWUP_QUESTIONS", "true").lower
 MAX_CONVERSATION_CONTEXT_LENGTH = int(os.getenv("MAX_CONVERSATION_CONTEXT_LENGTH", "8000"))  # chars
 CONVERSATION_TIMEOUT_HOURS = int(os.getenv("CONVERSATION_TIMEOUT_HOURS", "24"))  # Auto-cleanup old conversations
 
+# Async Job Processing Configuration (v1.2.0)
+ENABLE_ASYNC_JOBS = os.getenv("ENABLE_ASYNC_JOBS", "true").lower() in ["true", "1", "yes"]
+ASYNC_JOB_RETENTION_DAYS = int(os.getenv("ASYNC_JOB_RETENTION_DAYS", "30"))  # 30-day retention policy
+
 # --- App Setup ---
-app = FastAPI(title="Multi-Agent AI Orchestrator", version="1.1.0")
+app = FastAPI(title="Multi-Agent AI Orchestrator", version="1.2.0")
 
 # --- Conversation Storage ---
 # In-memory conversation storage (designed to be DB-compatible)
@@ -97,6 +109,33 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": "Internal Server Error", "error": str(exc)},
     )
+
+# Startup and Shutdown Events
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database and background tasks on startup"""
+    if ENABLE_ASYNC_JOBS:
+        logger.info("🚀 Initializing async job processing system...")
+        await init_db()
+        logger.info("✅ Database initialized successfully")
+
+        # Start periodic cleanup task
+        asyncio.create_task(periodic_cleanup_expired_jobs())
+        logger.info("✅ Periodic cleanup task started")
+
+async def periodic_cleanup_expired_jobs():
+    """Background task to periodically clean up expired jobs"""
+    while True:
+        try:
+            # Run cleanup every hour
+            await asyncio.sleep(3600)
+
+            async with async_session_factory() as session:
+                deleted_count = await cleanup_expired_jobs(session)
+                if deleted_count > 0:
+                    logger.info(f"🗑️  Cleaned up {deleted_count} expired jobs")
+        except Exception as e:
+            logger.error(f"Error in periodic cleanup: {e}", exc_info=True)
 
 # Security Headers Middleware
 @app.middleware("http")
@@ -321,6 +360,28 @@ class FollowUpResponse(BaseModel):
     response: str
     conversation_id: str
     parent_conversation_id: Optional[str] = None
+
+class AsyncJobSubmitResponse(BaseModel):
+    """Response when submitting an async job"""
+    url_slug: str
+    result_url: str
+    status: str
+    created_at: str
+    expires_at: str
+
+class AsyncJobStatusResponse(BaseModel):
+    """Response for job status/result queries"""
+    url_slug: str
+    question: str
+    status: str
+    response_content: Optional[str] = None
+    error_message: Optional[str] = None
+    conversation_id: Optional[str] = None
+    created_at: str
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    expires_at: str
+    last_updated: str
 
 # --- API Interaction ---
 async def verify_api_key(code_x_key: str = Header(..., alias="code-x-key")):
@@ -709,6 +770,16 @@ Please answer the new question taking into account the previous context."""
         "plan": plan
     }
 
+# --- Job Processor Initialization ---
+# Initialize job processor for async background jobs
+# We need to create a wrapper that returns just the final_answer string
+async def orchestrate_for_job(question: str) -> str:
+    """Wrapper for orchestrate that returns only the final answer string"""
+    result = await orchestrate(question)
+    return result["final_answer"]
+
+job_processor = JobProcessor(orchestrate_for_job)
+
 # --- Routes ---
 
 @app.post("/ask", response_model=ModelResponse)
@@ -733,6 +804,18 @@ async def ask_question(
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    csrf_token = generate_csrf_token(request)
+    return templates.TemplateResponse("index.html", {
+        "request": request,
+        "csrf_token": csrf_token
+    })
+
+@app.get("/result/{url_slug}", response_class=HTMLResponse)
+async def result_page(request: Request, url_slug: str):
+    """
+    Render the result page for an async job.
+    This uses the same template as index but the JavaScript detects the URL pattern.
+    """
     csrf_token = generate_csrf_token(request)
     return templates.TemplateResponse("index.html", {
         "request": request,
@@ -843,9 +926,174 @@ async def get_conversation_history(conversation_id: str):
 
     return conv
 
+# --- Async Job Endpoints (v1.2.0) ---
+
+@app.post("/web-ask-async", response_model=AsyncJobSubmitResponse)
+async def web_ask_question_async(
+    request: Request,
+    question: str = Form(...),
+    csrf_token: str = Form(...)
+):
+    """
+    Submit a question for async processing.
+    Returns a unique URL immediately without waiting for completion.
+    """
+    if not ENABLE_ASYNC_JOBS:
+        raise HTTPException(status_code=400, detail="Async job processing is disabled")
+
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+
+    try:
+        # Create async job in database
+        async with async_session_factory() as session:
+            job = await create_async_job(
+                session,
+                question=question,
+                retention_days=ASYNC_JOB_RETENTION_DAYS
+            )
+
+            logger.info(f"📝 Created async job: id={job.id}, slug={job.url_slug}")
+
+            # Start processing in background
+            asyncio.create_task(job_processor.process_job(job.id, job.url_slug))
+
+            # Return immediately with URL
+            result_url = f"/result/{job.url_slug}"
+            return AsyncJobSubmitResponse(
+                url_slug=job.url_slug,
+                result_url=result_url,
+                status=job.status.value,
+                created_at=job.created_at.isoformat(),
+                expires_at=job.expires_at.isoformat()
+            )
+
+    except Exception as e:
+        logger.error(f"Error creating async job: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to create async job")
+
+
+@app.get("/api/result/{url_slug}", response_model=AsyncJobStatusResponse)
+async def get_job_result(url_slug: str):
+    """
+    API endpoint to get the status and result of an async job by its URL slug.
+    Returns current status (queued/running/completed/failed) and result if available.
+    """
+    if not ENABLE_ASYNC_JOBS:
+        raise HTTPException(status_code=400, detail="Async job processing is disabled")
+
+    try:
+        async with async_session_factory() as session:
+            job = await get_job_by_slug(session, url_slug)
+
+            if not job:
+                raise HTTPException(status_code=404, detail="Job not found")
+
+            # Check if expired
+            if job.is_expired():
+                # Return 410 Gone for expired jobs
+                raise HTTPException(
+                    status_code=410,
+                    detail=f"This result has expired. Results are retained for {ASYNC_JOB_RETENTION_DAYS} days."
+                )
+
+            # Return job status and results
+            return AsyncJobStatusResponse(
+                url_slug=job.url_slug,
+                question=job.question,
+                status=job.status.value,
+                response_content=job.response_content,
+                error_message=job.error_message,
+                conversation_id=job.conversation_id,
+                created_at=job.created_at.isoformat(),
+                started_at=job.started_at.isoformat() if job.started_at else None,
+                completed_at=job.completed_at.isoformat() if job.completed_at else None,
+                expires_at=job.expires_at.isoformat(),
+                last_updated=job.last_updated.isoformat()
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving job result: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve job result")
+
+
+@app.post("/api/result/{url_slug}/retry")
+async def retry_failed_job(
+    request: Request,
+    url_slug: str,
+    csrf_token: str = Form(...)
+):
+    """
+    API endpoint to retry a failed async job.
+    Only works for jobs in FAILED status and not expired.
+    """
+    if not ENABLE_ASYNC_JOBS:
+        raise HTTPException(status_code=400, detail="Async job processing is disabled")
+
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+
+    try:
+        async with async_session_factory() as session:
+            job = await get_job_by_slug(session, url_slug)
+
+            if not job:
+                raise HTTPException(status_code=404, detail="Job not found")
+
+            if job.is_expired():
+                raise HTTPException(
+                    status_code=410,
+                    detail=f"This job has expired. Jobs are retained for {ASYNC_JOB_RETENTION_DAYS} days."
+                )
+
+            if job.status != JobStatus.FAILED:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Can only retry failed jobs. Current status: {job.status.value}"
+                )
+
+            # Retry the job
+            success = await job_processor.retry_job(job.id, url_slug)
+
+            if success:
+                return {"status": "retry_initiated", "url_slug": url_slug}
+            else:
+                raise HTTPException(status_code=500, detail="Failed to initiate retry")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrying job: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retry job")
+
+
+@app.get("/admin/job-stats")
+async def get_job_statistics():
+    """
+    Get statistics about async jobs (for monitoring).
+    In production, this should be protected with authentication.
+    """
+    if not ENABLE_ASYNC_JOBS:
+        raise HTTPException(status_code=400, detail="Async job processing is disabled")
+
+    try:
+        async with async_session_factory() as session:
+            stats = await get_job_stats(session)
+            return stats
+    except Exception as e:
+        logger.error(f"Error getting job stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get job statistics")
+
+
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "followup_enabled": ENABLE_FOLLOWUP_QUESTIONS}
+    return {
+        "status": "healthy",
+        "followup_enabled": ENABLE_FOLLOWUP_QUESTIONS,
+        "async_jobs_enabled": ENABLE_ASYNC_JOBS
+    }
 
 if __name__ == "__main__":
     import uvicorn

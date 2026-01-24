@@ -326,6 +326,57 @@
             }
         }
 
+        /* Async Status Container */
+        .async-status-container {
+            display: none;
+            margin-top: 2rem;
+        }
+
+        .async-status-card {
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+            border: 2px solid #0ea5e9;
+            border-radius: 16px;
+            padding: 1.5rem;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        .status-header {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #0369a1;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+        }
+
+        .status-badge {
+            text-align: center;
+        }
+
+        .status-badge .badge {
+            font-size: 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+        }
+
+        .status-info {
+            background: white;
+            padding: 1rem;
+            border-radius: 12px;
+        }
+
+        .status-actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: center;
+        }
+
+        #asyncResultUrl {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            background-color: #f8fafc;
+        }
+
         /* Response Card */
         .response-container {
             display: none;
@@ -715,6 +766,18 @@
                                     </label>
                                 </div>
 
+                                <!-- Async Mode Toggle -->
+                                <div class="form-check mb-3">
+                                    <input class="form-check-input" type="checkbox" id="asyncModeToggle" checked>
+                                    <label class="form-check-label" for="asyncModeToggle">
+                                        <i class="bi bi-clock-history me-2"></i>
+                                        <strong>Async Mode:</strong> Get a shareable URL immediately (30-day retention)
+                                    </label>
+                                    <small class="d-block text-muted ms-4">
+                                        When enabled, you'll receive a unique URL immediately and can leave the page while processing.
+                                    </small>
+                                </div>
+
                                 <div class="btn-container">
                                     <button type="submit" class="btn btn-gradient" id="submitBtn">
                                         <i class="bi bi-send me-2"></i>Ask Question
@@ -740,6 +803,45 @@
                                 </div>
                                 <div class="loading-text typing-dots">Processing your question</div>
                                 <div class="loading-subtext">Our AI is analyzing and generating a response...</div>
+                            </div>
+
+                            <!-- Async Job Status Display -->
+                            <div class="async-status-container" id="asyncStatusContainer" style="display: none;">
+                                <div class="async-status-card">
+                                    <div class="status-header">
+                                        <i class="bi bi-hourglass-split me-2"></i>
+                                        <span id="asyncStatusTitle">Job Status</span>
+                                    </div>
+                                    <div class="status-body">
+                                        <div class="status-badge" id="asyncStatusBadge">
+                                            <span class="badge bg-info" id="asyncStatusText">QUEUED</span>
+                                        </div>
+                                        <div class="status-info mt-3">
+                                            <p class="mb-2"><strong>Shareable URL:</strong></p>
+                                            <div class="input-group mb-3">
+                                                <input type="text" class="form-control" id="asyncResultUrl" readonly>
+                                                <button class="btn btn-outline-secondary" type="button" onclick="copyUrlToClipboard()">
+                                                    <i class="bi bi-clipboard"></i> Copy
+                                                </button>
+                                            </div>
+                                            <p class="text-muted small mb-2" id="asyncStatusMessage">
+                                                Your request is being processed. You can safely leave this page.
+                                            </p>
+                                            <p class="text-muted small">
+                                                <i class="bi bi-calendar-check me-1"></i>
+                                                <span id="asyncExpires">Expires in 30 days</span>
+                                            </p>
+                                        </div>
+                                        <div class="status-actions mt-3">
+                                            <button class="btn btn-sm btn-primary" id="asyncRefreshBtn" onclick="manualRefreshStatus()">
+                                                <i class="bi bi-arrow-clockwise me-1"></i> Refresh Status
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-danger" id="asyncRetryBtn" style="display: none;" onclick="retryAsyncJob()">
+                                                <i class="bi bi-arrow-repeat me-1"></i> Retry Job
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Response Container -->
@@ -799,6 +901,8 @@
         let questionAsked = false;
         let lastQuestion = '';
         let currentConversationId = null;
+        let currentAsyncJobSlug = null;
+        let pollingInterval = null;
 
         async function submitQuestion(isRetry = false) {
             const question = document.getElementById('question').value.trim();
@@ -807,12 +911,23 @@
                 return;
             }
 
+            // Check if async mode is enabled
+            const asyncMode = document.getElementById('asyncModeToggle').checked;
+
             // Store the question for retry functionality
             if (!isRetry) {
                 lastQuestion = question;
             }
 
-            // Show loading state with animation
+            if (asyncMode) {
+                await submitQuestionAsync(question, isRetry);
+            } else {
+                await submitQuestionSync(question, isRetry);
+            }
+        }
+
+        async function submitQuestionSync(question, isRetry) {
+            // Original synchronous submission logic
             const loading = document.getElementById('loading');
             const submitBtn = document.getElementById('submitBtn');
             const retryBtn = document.getElementById('retryBtn');
@@ -829,7 +944,6 @@
             newQuestionNotice.style.display = 'none';
 
             try {
-                // Create form data with CSRF token
                 const formData = new FormData();
                 formData.append('question', question);
                 formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
@@ -844,7 +958,6 @@
                 if (contentType && contentType.includes("application/json")) {
                     data = await response.json();
                 } else {
-                    // Fallback for non-JSON responses (e.g., HTML error pages)
                     const text = await response.text();
                     console.error("Non-JSON response received:", text);
                     if (!response.ok) {
@@ -857,17 +970,14 @@
                     throw new Error(data.detail || 'An error occurred while processing your question.');
                 }
 
-                // Check if response is empty or malformed
                 if (!data.response || data.response.trim() === '') {
                     throw new Error('Received empty response from AI. Please try again.');
                 }
 
-                // Check if response looks malformed (very short or contains error indicators)
                 if (data.response.length < 20 || data.response.includes('[ERROR]') || data.response.includes('failed')) {
                     throw new Error('Received potentially malformed response. Please retry your question.');
                 }
 
-                // Hide loading and display response with animation
                 loading.style.display = 'none';
                 document.getElementById('responseContent').innerHTML = marked.parse(data.response);
                 responseContainer.style.display = 'block';
@@ -875,13 +985,11 @@
                 newQuestionNotice.style.display = 'block';
                 newQuestionNotice.classList.add('fade-in');
 
-                // Store conversation ID if provided
                 if (data.conversation_id) {
                     currentConversationId = data.conversation_id;
                     console.log('Conversation ID stored:', currentConversationId);
                 }
 
-                // Show follow-up section if verdict is present
                 if (data.response.includes('## 3. Synthesis & Final Verdict')) {
                     const followupSection = document.getElementById('followupSection');
                     if (followupSection) {
@@ -890,7 +998,6 @@
                     }
                 }
 
-                // Mark question as asked and update UI
                 if (!isRetry) {
                     questionAsked = true;
                     document.getElementById('question').disabled = true;
@@ -898,15 +1005,237 @@
                 }
                 submitBtn.style.display = 'none';
                 document.getElementById('newQuestionBtn').style.display = 'inline-block';
-                retryBtn.style.display = 'inline-block'; // Always show retry button after response
+                retryBtn.style.display = 'inline-block';
 
             } catch (error) {
-                showError(error.message, true); // Show error with retry option
+                showError(error.message, true);
             } finally {
                 loading.style.display = 'none';
                 submitBtn.disabled = false;
             }
         }
+
+        async function submitQuestionAsync(question, isRetry) {
+            // Async submission - get URL immediately and poll for results
+            const submitBtn = document.getElementById('submitBtn');
+            const errorDiv = document.getElementById('error');
+            const asyncStatusContainer = document.getElementById('asyncStatusContainer');
+
+            submitBtn.disabled = true;
+            errorDiv.style.display = 'none';
+
+            try {
+                const formData = new FormData();
+                formData.append('question', question);
+                formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+
+                const response = await fetch('/web-ask-async', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Failed to submit async job');
+                }
+
+                const data = await response.json();
+                currentAsyncJobSlug = data.url_slug;
+
+                // Update URL in browser without reload
+                const resultUrl = `${window.location.origin}${data.result_url}`;
+                window.history.pushState({asyncJob: true, slug: data.url_slug}, '', data.result_url);
+
+                // Show async status container
+                asyncStatusContainer.style.display = 'block';
+                document.getElementById('asyncResultUrl').value = resultUrl;
+                updateAsyncStatusUI(data.status, 'Job created successfully. Processing...');
+
+                // Hide form
+                document.getElementById('questionForm').style.display = 'none';
+
+                // Start polling for status
+                startPolling(data.url_slug);
+
+            } catch (error) {
+                showError(error.message, true);
+                submitBtn.disabled = false;
+            }
+        }
+
+        function startPolling(urlSlug) {
+            // Stop any existing polling
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+
+            // Poll every 3 seconds
+            pollingInterval = setInterval(async () => {
+                await checkJobStatus(urlSlug);
+            }, 3000);
+
+            // Also check immediately
+            checkJobStatus(urlSlug);
+        }
+
+        async function checkJobStatus(urlSlug) {
+            try {
+                const response = await fetch(`/api/result/${urlSlug}`);
+
+                if (response.status === 410) {
+                    // Job expired
+                    clearInterval(pollingInterval);
+                    updateAsyncStatusUI('expired', 'This result has expired (30-day retention limit reached).');
+                    return;
+                }
+
+                if (!response.ok) {
+                    throw new Error('Failed to check job status');
+                }
+
+                const data = await response.json();
+
+                switch (data.status) {
+                    case 'queued':
+                        updateAsyncStatusUI('queued', 'Job is queued and waiting to be processed...');
+                        break;
+                    case 'running':
+                        updateAsyncStatusUI('running', 'Job is currently being processed by AI agents...');
+                        break;
+                    case 'completed':
+                        clearInterval(pollingInterval);
+                        updateAsyncStatusUI('completed', 'Job completed successfully!');
+                        displayAsyncResult(data);
+                        break;
+                    case 'failed':
+                        clearInterval(pollingInterval);
+                        updateAsyncStatusUI('failed', `Job failed: ${data.error_message || 'Unknown error'}`);
+                        document.getElementById('asyncRetryBtn').style.display = 'inline-block';
+                        break;
+                }
+            } catch (error) {
+                console.error('Error checking job status:', error);
+            }
+        }
+
+        function updateAsyncStatusUI(status, message) {
+            const badge = document.getElementById('asyncStatusText');
+            const messageEl = document.getElementById('asyncStatusMessage');
+
+            badge.textContent = status.toUpperCase();
+            messageEl.textContent = message;
+
+            // Update badge color
+            badge.className = 'badge';
+            switch (status) {
+                case 'queued':
+                    badge.classList.add('bg-info');
+                    break;
+                case 'running':
+                    badge.classList.add('bg-primary');
+                    break;
+                case 'completed':
+                    badge.classList.add('bg-success');
+                    break;
+                case 'failed':
+                    badge.classList.add('bg-danger');
+                    break;
+                case 'expired':
+                    badge.classList.add('bg-secondary');
+                    break;
+            }
+        }
+
+        function displayAsyncResult(data) {
+            // Display the completed result
+            const responseContainer = document.getElementById('responseContainer');
+            document.getElementById('responseContent').innerHTML = marked.parse(data.response_content);
+            responseContainer.style.display = 'block';
+            responseContainer.querySelector('.response-card').classList.add('slide-up');
+
+            // Show follow-up section if verdict is present
+            if (data.response_content && data.response_content.includes('## 3. Synthesis & Final Verdict')) {
+                const followupSection = document.getElementById('followupSection');
+                if (followupSection) {
+                    followupSection.style.display = 'block';
+                    followupSection.classList.add('fade-in');
+                }
+
+                if (data.conversation_id) {
+                    currentConversationId = data.conversation_id;
+                }
+            }
+
+            // Show new question button
+            document.getElementById('newQuestionBtn').style.display = 'inline-block';
+        }
+
+        function copyUrlToClipboard() {
+            const urlInput = document.getElementById('asyncResultUrl');
+            urlInput.select();
+            urlInput.setSelectionRange(0, 99999); // For mobile devices
+            navigator.clipboard.writeText(urlInput.value);
+
+            // Visual feedback
+            const btn = event.target.closest('button');
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="bi bi-check"></i> Copied!';
+            setTimeout(() => {
+                btn.innerHTML = originalHtml;
+            }, 2000);
+        }
+
+        async function manualRefreshStatus() {
+            if (currentAsyncJobSlug) {
+                await checkJobStatus(currentAsyncJobSlug);
+            }
+        }
+
+        async function retryAsyncJob() {
+            if (!currentAsyncJobSlug) return;
+
+            try {
+                const formData = new FormData();
+                formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+
+                const response = await fetch(`/api/result/${currentAsyncJobSlug}/retry`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Failed to retry job');
+                }
+
+                // Hide retry button and start polling again
+                document.getElementById('asyncRetryBtn').style.display = 'none';
+                updateAsyncStatusUI('queued', 'Retrying job...');
+                startPolling(currentAsyncJobSlug);
+
+            } catch (error) {
+                showError(error.message, false);
+            }
+        }
+
+        // Check if we're on a result page (URL contains /result/)
+        window.addEventListener('load', async () => {
+            const path = window.location.pathname;
+            const match = path.match(/^\/result\/([a-zA-Z0-9_-]+)$/);
+
+            if (match) {
+                const urlSlug = match[1];
+                currentAsyncJobSlug = urlSlug;
+
+                // Hide form, show async status
+                document.getElementById('questionForm').style.display = 'none';
+                document.getElementById('asyncStatusContainer').style.display = 'block';
+                document.getElementById('asyncResultUrl').value = window.location.href;
+
+                // Start polling
+                startPolling(urlSlug);
+            }
+        });
 
         document.getElementById('questionForm').addEventListener('submit', async function (e) {
             e.preventDefault();
