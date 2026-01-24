@@ -772,11 +772,28 @@ Please answer the new question taking into account the previous context."""
 
 # --- Job Processor Initialization ---
 # Initialize job processor for async background jobs
-# We need to create a wrapper that returns just the final_answer string
-async def orchestrate_for_job(question: str) -> str:
-    """Wrapper for orchestrate that returns only the final answer string"""
+# We need to create a wrapper that returns the final answer and creates a conversation
+async def orchestrate_for_job(question: str) -> Dict[str, Any]:
+    """
+    Wrapper for orchestrate that returns the final answer and conversation_id.
+    Creates a conversation to enable follow-up questions for async jobs.
+
+    Returns:
+        Dict with 'response' (str) and 'conversation_id' (str)
+    """
     result = await orchestrate(question)
-    return result["final_answer"]
+    response = result["final_answer"]
+
+    # Create a conversation to enable follow-up questions
+    conversation_id = None
+    if ENABLE_FOLLOWUP_QUESTIONS:
+        conversation_id = create_conversation(question, response)
+        logger.info(f"📝 Created conversation {conversation_id} for async job")
+
+    return {
+        "response": response,
+        "conversation_id": conversation_id
+    }
 
 job_processor = JobProcessor(orchestrate_for_job)
 
