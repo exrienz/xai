@@ -8,6 +8,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py .
 COPY system_prompts.py .
+COPY database.py .
+COPY job_processor.py .
 COPY templates/ ./templates/
 
 EXPOSE 2000
