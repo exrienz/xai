@@ -7,11 +7,12 @@ A powerful FastAPI-based application that coordinates a team of specialized AI a
 - **Intelligent Orchestration**: Analyzes questions to determine the necessary domains and agent roles.
 - **Multi-Agent Collaboration**: Spawns 3-9 specialized agents (e.g., Medical Expert, Legal Advisor, Technical Analyst) to reason independently.
 - **Parallel Execution**: Runs agent tasks concurrently for faster response times.
-- **Follow-up Questions**: 🆕 Continue conversations after the final verdict by asking follow-up questions while preserving context.
+- **Async URL Responses**: 🆕 Get a unique, shareable URL immediately when submitting questions. Results persist for 30 days and can be accessed anytime.
+- **Follow-up Questions**: Continue conversations after the final verdict by asking follow-up questions while preserving context.
 - **Robust Fallback System**: Automatically switches to backup models if the primary model fails or refuses a request.
 - **Censorship Detection**: Detects and handles refusals/censorship from models.
 - **Dual Interface**:
-  - **Web UI**: Clean, responsive interface for direct interaction with follow-up support.
+  - **Web UI**: Clean, responsive interface with async mode toggle and real-time status updates.
   - **REST API**: Full JSON API for integration with other apps.
 - **Customizable Model Pools**: Configure specific models for orchestrators and specialists via environment variables.
 
@@ -176,7 +177,139 @@ The application now supports multi-turn conversations with context preservation:
 
 - Context is limited to the "## 3. Synthesis & Final Verdict" section (not the full conversation history)
 - Maximum context length is enforced to prevent excessive costs and latency
-- Conversations are stored in-memory (will be lost on server restart until database persistence is implemented)
+
+## 🔗 Async URL Responses (v1.2.0)
+
+The application now supports asynchronous job processing with persistent, shareable URLs:
+
+### How It Works
+
+1. **Enable Async Mode**: Check the "Async Mode" toggle in the web interface (enabled by default)
+2. **Submit Question**: Click "Ask Question" - you'll immediately receive a unique URL
+3. **Get Shareable URL**: Copy the URL and share it, bookmark it, or leave the page
+4. **Real-time Updates**: The page automatically polls for status updates (queued → running → completed/failed)
+5. **Persistent Results**: Results are stored for 30 days and accessible anytime via the unique URL
+6. **Retry on Failure**: If a job fails, you can retry it with a single click
+
+### Features
+
+- **Immediate Response**: Get a unique URL within seconds, no need to wait for completion
+- **30-Day Retention**: All results are accessible for 30 days after creation
+- **Shareable URLs**: Send the URL to colleagues or save it for later reference
+- **Automatic Cleanup**: Expired results are automatically deleted after 30 days
+- **Real-time Status**: Live status updates (queued, running, completed, failed) with automatic polling
+- **Retry Mechanism**: Failed jobs can be retried without resubmitting the question
+- **Concurrent Processing**: Background job processing doesn't block the web server
+- **Expiration Handling**: Expired URLs return a user-friendly 410 Gone response
+
+### API Endpoints
+
+#### Submit Async Job
+```bash
+POST /web-ask-async
+Content-Type: multipart/form-data
+
+question=Your+question+here&csrf_token=...
+
+Response:
+{
+  "url_slug": "a1b2c3d4e5f6",
+  "result_url": "/result/a1b2c3d4e5f6",
+  "status": "queued",
+  "created_at": "2024-01-24T12:00:00",
+  "expires_at": "2024-02-23T12:00:00"
+}
+```
+
+#### Get Job Status/Result
+```bash
+GET /api/result/{url_slug}
+
+Response (while processing):
+{
+  "url_slug": "a1b2c3d4e5f6",
+  "question": "Your question",
+  "status": "running",
+  "response_content": null,
+  "error_message": null,
+  "created_at": "2024-01-24T12:00:00",
+  "started_at": "2024-01-24T12:00:05",
+  "completed_at": null,
+  "expires_at": "2024-02-23T12:00:00",
+  "last_updated": "2024-01-24T12:00:05"
+}
+
+Response (completed):
+{
+  "url_slug": "a1b2c3d4e5f6",
+  "question": "Your question",
+  "status": "completed",
+  "response_content": "## 1. Agent Roster\n...",
+  "created_at": "2024-01-24T12:00:00",
+  "completed_at": "2024-01-24T12:01:30",
+  "expires_at": "2024-02-23T12:00:00",
+  ...
+}
+
+Response (expired):
+410 Gone
+{
+  "detail": "This result has expired. Results are retained for 30 days."
+}
+```
+
+#### Retry Failed Job
+```bash
+POST /api/result/{url_slug}/retry
+Content-Type: multipart/form-data
+
+csrf_token=...
+
+Response:
+{
+  "status": "retry_initiated",
+  "url_slug": "a1b2c3d4e5f6"
+}
+```
+
+#### Job Statistics (Monitoring)
+```bash
+GET /admin/job-stats
+
+Response:
+{
+  "queued": 5,
+  "running": 2,
+  "completed": 150,
+  "failed": 3,
+  "total": 160
+}
+```
+
+### Usage Tips
+
+- **Long-running Queries**: Use async mode for complex questions that might take a while
+- **Sharing Results**: Share the URL with team members without waiting for completion
+- **Bookmark Important Answers**: Save the URL for future reference (valid for 30 days)
+- **Offline Processing**: Submit a question and come back later to see the result
+- **Sync Mode**: Disable async mode if you prefer traditional blocking behavior
+
+### Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ENABLE_ASYNC_JOBS` | Enable/disable async job processing | `true` |
+| `ASYNC_JOB_RETENTION_DAYS` | Days before jobs expire and are deleted | `30` |
+| `DATABASE_URL` | Database connection string | `sqlite+aiosqlite:///./xai_async_jobs.db` |
+| `SQL_DEBUG` | Enable SQL query logging | `false` |
+
+### Database
+
+Async jobs are stored in a SQLite database (or PostgreSQL in production). The database is automatically initialized on startup.
+
+**Schema:**
+- `async_jobs` table with columns: id, url_slug, question, status, response_content, error_message, conversation_id, created_at, started_at, completed_at, expires_at, last_updated
+- Automatic cleanup task runs every hour to remove expired jobs
 
 ## ⚙️ Configuration
 
@@ -193,6 +326,10 @@ Key environment variables in `.env`:
 | `ENABLE_FOLLOWUP_QUESTIONS` | Enable/disable follow-up questions feature | `true` |
 | `MAX_CONVERSATION_CONTEXT_LENGTH` | Max characters of context to preserve in follow-ups | `8000` |
 | `CONVERSATION_TIMEOUT_HOURS` | Hours before old conversations are auto-cleaned | `24` |
+| `ENABLE_ASYNC_JOBS` | Enable/disable async job processing with persistent URLs | `true` |
+| `ASYNC_JOB_RETENTION_DAYS` | Days before async job results expire | `30` |
+| `DATABASE_URL` | Database connection string for async jobs | `sqlite+aiosqlite:///./xai_async_jobs.db` |
+| `SQL_DEBUG` | Enable SQL query logging for debugging | `false` |
 
 ## 🤝 Contributing
 
