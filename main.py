@@ -342,11 +342,11 @@ async def step1_plan(question: str) -> Dict[str, Any]:
         if not plan:
             raise ValueError("Could not extract JSON from response")
 
-        # Enforce agent limits (< 10)
+        # Enforce agent limits (< 16)
         agents = plan.get("agents", [])
-        if len(agents) >= 10:
-            logger.warning(f"Orchestrator suggested {len(agents)} agents. Limiting to 9.")
-            agents = agents[:9]
+        if len(agents) >= 16:
+            logger.warning(f"Orchestrator suggested {len(agents)} agents. Limiting to 15.")
+            agents = agents[:15]
             plan["agents"] = agents
 
         logger.info(f"📋 ORCHESTRATOR PLAN: {plan}")
